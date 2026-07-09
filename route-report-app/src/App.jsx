@@ -344,7 +344,7 @@ function TopBarButton({ icon, title, onClick, disabled, accent }) {
   );
 }
 
-function TemplateEditor({ template, setTemplate, report, lastVisitDate, onResetToDefaults, onSaveTemplate }) {
+function TemplateEditor({ template, setTemplate, report, lastVisitDate, saveFlash, onResetToDefaults, onSaveTemplate }) {
   const previewRows = getSampleRows(report);
 
   const updateTemplate = (key) => (value) => {
@@ -442,7 +442,7 @@ function TemplateEditor({ template, setTemplate, report, lastVisitDate, onResetT
                 className="rounded-lg px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition active:scale-[0.99]"
                 style={{ background: template.accent, fontFamily: THEME.bodyFont }}
               >
-                Saved ✓
+                {saveFlash ? "Saved ✓" : "Save Template"}
               </button>
             </div>
           </div>
