@@ -13,7 +13,19 @@ const DEFAULT_TEMPLATE = {
   colProduct: "Product Name",
   colQty: "Quantity",
   accent: "#7A2E33",
+  bandingEnabled: true,
+  bandingColor: "#F3E3E1",
 };
+
+const BANDING_COLORS = [
+  { name: "Blush Cherry", value: "#F3E3E1" },
+  { name: "Warm Ivory", value: "#F4EFE6" },
+  { name: "Sage Whisper", value: "#E7EFE5" },
+  { name: "Powder Sky", value: "#E6EEF5" },
+  { name: "Soft Lilac", value: "#EFE9F5" },
+  { name: "Pale Sand", value: "#F5EFE0" },
+  { name: "Ash Gray", value: "#ECEAE7" },
+];
 
 const ACCENTS = [
   { name: "Cherry Alloy", value: "#7A2E33" },
@@ -362,6 +374,43 @@ function TemplateEditor({ template, setTemplate, onReset, previewData }) {
             </div>
           </div>
 
+          <div className="pt-5 mt-5" style={{ borderTop: `1px solid ${T.border}` }}>
+            <div className="flex items-center justify-between mb-2">
+              <Label>Outlet row banding</Label>
+              <button
+                type="button"
+                onClick={() => setTemplate({ ...template, bandingEnabled: !template.bandingEnabled })}
+                className="relative w-10 h-5.5 rounded-full transition-colors shrink-0"
+                style={{ background: template.bandingEnabled ? template.accent : T.border, height: 22, width: 40 }}
+                title={template.bandingEnabled ? "Banding on" : "Banding off"}
+              >
+                <span
+                  className="absolute top-0.5 rounded-full bg-white transition-transform"
+                  style={{ width: 18, height: 18, left: 2, transform: template.bandingEnabled ? "translateX(18px)" : "translateX(0)" }}
+                />
+              </button>
+            </div>
+            <p className="text-xs mb-3" style={{ color: T.textMuted }}>Shades every other outlet's rows so its products are easier to scan. Applies to the table, the Excel export, and the PDF export.</p>
+            {template.bandingEnabled && (
+              <div className="flex items-center gap-3 flex-wrap">
+                {BANDING_COLORS.map((c) => (
+                  <button
+                    key={c.value}
+                    onClick={() => setTemplate({ ...template, bandingColor: c.value })}
+                    title={c.name}
+                    className="w-8 h-8 rounded-full cursor-pointer transition-transform hover:scale-110"
+                    style={{
+                      backgroundColor: c.value,
+                      border: `1px solid ${T.border}`,
+                      outline: template.bandingColor === c.value ? `2px solid ${T.text}` : "none",
+                      outlineOffset: "2px",
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="pt-6 flex items-center justify-between">
             <button onClick={onReset} className="flex items-center gap-1.5 text-sm transition-colors" style={{ color: T.textMuted, fontFamily: T.bodyFont }}>
               <Icon name="restart_alt" size={18} /> Reset to defaults
@@ -574,9 +623,11 @@ export default function App() {
       cell.border = borderAll;
     });
 
+    const bandARGB = "FF" + template.bandingColor.replace("#", "").toUpperCase();
     let r = headerRowNum;
     report.outlets.forEach((outlet, idx) => {
       const startRow = r + 1;
+      const banded = template.bandingEnabled && idx % 2 === 1;
       outlet.items.forEach((item, i) => {
         r += 1;
         const row = ws.getRow(r);
@@ -584,7 +635,10 @@ export default function App() {
         row.getCell(2).value = i === 0 ? outlet.name : null;
         row.getCell(3).value = item.product;
         row.getCell(4).value = item.qty;
-        [1, 2, 3, 4].forEach((c) => { row.getCell(c).border = borderAll; });
+        [1, 2, 3, 4].forEach((c) => {
+          row.getCell(c).border = borderAll;
+          if (banded) row.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: bandARGB } };
+        });
         row.getCell(4).alignment = { horizontal: "right" };
         row.getCell(3).alignment = { vertical: "middle" };
       });
@@ -611,13 +665,17 @@ export default function App() {
   function exportPdf() {
     if (!report) return;
     const win = window.open("", "_blank");
-    const rowsHtml = report.outlets.map((outlet, idx) => outlet.items.map((item, i) => `
-      <tr>
+    const rowsHtml = report.outlets.map((outlet, idx) => {
+      const banded = template.bandingEnabled && idx % 2 === 1;
+      const bg = banded ? ` style="background:${template.bandingColor}"` : "";
+      return outlet.items.map((item, i) => `
+      <tr${bg}>
         <td>${i === 0 ? idx + 1 : ""}</td>
         <td>${i === 0 ? outlet.name : ""}</td>
         <td>${item.product}</td>
         <td style="text-align:right">${item.qty}</td>
-      </tr>`).join("")).join("");
+      </tr>`).join("");
+    }).join("");
 
     win.document.write(`
       <html><head><title>${territory} - ${routeName}</title>
@@ -819,14 +877,18 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody>
-                          {pagedOutlets.map((outlet, idx) => outlet.items.map((item, i) => (
-                            <tr key={`${idx}-${i}`} style={{ borderBottom: `1px solid ${T.border}` }}>
-                              <td className="px-5 py-2 align-top" style={{ color: T.textMuted }}>{i === 0 ? String(page * PAGE_SIZE + idx + 1).padStart(2, "0") : ""}</td>
-                              <td className="px-3 py-2 align-top font-semibold">{i === 0 ? outlet.name : ""}</td>
-                              <td className="px-3 py-2">{item.product}</td>
-                              <td className="px-5 py-2 text-right tabular-nums">{item.qty}</td>
-                            </tr>
-                          )))}
+                          {pagedOutlets.map((outlet, idx) => {
+                            const absoluteIdx = page * PAGE_SIZE + idx;
+                            const banded = template.bandingEnabled && absoluteIdx % 2 === 1;
+                            return outlet.items.map((item, i) => (
+                              <tr key={`${idx}-${i}`} style={{ borderBottom: `1px solid ${T.border}`, background: banded ? template.bandingColor : "transparent" }}>
+                                <td className="px-5 py-2 align-top" style={{ color: T.textMuted }}>{i === 0 ? String(absoluteIdx + 1).padStart(2, "0") : ""}</td>
+                                <td className="px-3 py-2 align-top font-semibold">{i === 0 ? outlet.name : ""}</td>
+                                <td className="px-3 py-2">{item.product}</td>
+                                <td className="px-5 py-2 text-right tabular-nums">{item.qty}</td>
+                              </tr>
+                            ));
+                          })}
                         </tbody>
                       </table>
                       <div className="flex items-center justify-between px-5 py-4 text-sm" style={{ color: T.textMuted, borderTop: `1px solid ${T.border}` }}>
