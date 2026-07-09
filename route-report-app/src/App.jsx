@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import * as XLSX from "xlsx";
 import ExcelJS from "exceljs";
-import { Upload, FileSpreadsheet, Settings2, LayoutDashboard, Download, FileDown, ChevronRight, CircleAlert, CircleCheck, RotateCcw } from "lucide-react";
 
 const DEFAULT_TEMPLATE = {
   reportTitle: "Last Visit Outlet Wise Quantity Sales",
@@ -13,17 +12,15 @@ const DEFAULT_TEMPLATE = {
   colOutlet: "Outlet Name",
   colProduct: "Product Name",
   colQty: "Quantity",
-  titleFont: "Georgia, 'Times New Roman', serif",
-  bodyFont: "'Segoe UI', Calibri, Arial, sans-serif",
-  accent: "#8a5a2c",
+  accent: "#7A2E33",
 };
 
 const ACCENTS = [
-  { name: "Ledger brown", value: "#8a5a2c" },
-  { name: "Ink navy", value: "#233246" },
-  { name: "Forest", value: "#2f5233" },
-  { name: "Maroon", value: "#6b2b3a" },
-  { name: "Slate", value: "#475467" },
+  { name: "Cherry Alloy", value: "#7A2E33" },
+  { name: "Stone Charcoal", value: "#4A4743" },
+  { name: "Deep Navy", value: "#2E4A7A" },
+  { name: "Industrial Forest", value: "#2E7A4E" },
+  { name: "Legacy Bronze", value: "#7A5E2E" },
 ];
 
 const VISIT_BLOCKS = [
@@ -32,8 +29,8 @@ const VISIT_BLOCKS = [
   { key: "3rd", label: "PREVIOUS 3RD VISIT", start: 17 },
   { key: "4th", label: "PREVIOUS 4TH VISIT", start: 10 },
 ];
-// column offsets within a 7-col visit block
 const OFF = { qty: 0, invoice: 1, retQty: 2, retVal: 3, freeQty: 4, freeVal: 5, net: 6 };
+const PAGE_SIZE = 4;
 
 function num(v) {
   const n = typeof v === "number" ? v : parseFloat(v);
@@ -51,7 +48,7 @@ function parseMasterReport(rows) {
   }
   if (headerRow === -1) throw new Error("Couldn't find the header row (expecting a 'NO' / 'TERRITORY' row). Is this a Route Wise Item Wise Outlet Wise Sales Report export?");
 
-  const dataStart = headerRow + 2; // skip header + sub-header (QUANTITY, INVOICE VALUE...) row
+  const dataStart = headerRow + 2;
   const filled = { no: null, rsm: null, asm: null, ase: null, territory: null, routeNumber: null, routeName: null, outletId: null, outletName: null };
   const out = [];
 
@@ -74,10 +71,7 @@ function parseMasterReport(rows) {
 
     const visits = {};
     VISIT_BLOCKS.forEach((b) => {
-      visits[b.key] = {
-        qty: num(r[b.start + OFF.qty]),
-        net: num(r[b.start + OFF.net]),
-      };
+      visits[b.key] = { qty: num(r[b.start + OFF.qty]), net: num(r[b.start + OFF.net]) };
     });
 
     out.push({
@@ -124,87 +118,207 @@ function buildReport(rows, territory, routeName, strategy) {
   return { outlets, totalSale, matchedRows, consideredRows: filtered.length };
 }
 
-function TemplateEditor({ template, setTemplate, onReset }) {
-  const field = (key, label, placeholder) => (
-    <label className="block mb-4">
-      <span className="block text-xs font-semibold tracking-wide uppercase text-stone-500 mb-1.5">{label}</span>
-      <input
-        className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-offset-1"
-        style={{ "--tw-ring-color": template.accent }}
-        value={template[key]}
-        placeholder={placeholder}
-        onChange={(e) => setTemplate({ ...template, [key]: e.target.value })}
-      />
-    </label>
+// ---------- shared visual tokens ----------
+const T = {
+  bg: "#FCF9F4",
+  surface: "#FFFFFF",
+  surfaceLow: "#F6F3EE",
+  surfaceContainer: "#F0EDE9",
+  border: "#DAC1C0",
+  text: "#1C1C19",
+  textMuted: "#544242",
+  headFont: "'Manrope', sans-serif",
+  bodyFont: "'Work Sans', sans-serif",
+  capsFont: "'IBM Plex Sans', sans-serif",
+};
+
+function Icon({ name, size = 20, style }) {
+  return (
+    <span className="material-symbols-outlined" style={{ fontSize: size, lineHeight: 1, ...style }}>
+      {name}
+    </span>
   );
+}
+
+function Label({ children }) {
+  return (
+    <span
+      className="block uppercase mb-1.5"
+      style={{ fontFamily: T.capsFont, fontSize: 11, letterSpacing: "0.1em", fontWeight: 600, color: T.textMuted }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function TextField({ value, onChange, accent }) {
+  return (
+    <input
+      className="w-full rounded-md px-3 py-2 text-sm outline-none transition-all"
+      style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.text, fontFamily: T.bodyFont }}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onFocus={(e) => { e.target.style.boxShadow = `0 0 0 2px ${accent}55`; e.target.style.borderColor = accent; }}
+      onBlur={(e) => { e.target.style.boxShadow = "none"; e.target.style.borderColor = T.border; }}
+    />
+  );
+}
+
+function Select({ value, onChange, children }) {
+  return (
+    <select
+      className="w-full rounded-md px-2.5 py-2 text-sm outline-none"
+      style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.text, fontFamily: T.bodyFont }}
+      value={value}
+      onChange={onChange}
+    >
+      {children}
+    </select>
+  );
+}
+
+function TemplateEditor({ template, setTemplate, onReset, previewData }) {
+  const [saved, setSaved] = useState(false);
+  const field = (key) => ({ value: template[key], onChange: (v) => setTemplate({ ...template, [key]: v }), accent: template.accent });
+
+  function handleSave() {
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
+  }
 
   return (
-    <div className="grid md:grid-cols-2 gap-10">
-      <div>
-        <h3 className="text-sm font-semibold tracking-wide uppercase text-stone-500 mb-4">Header block text</h3>
-        {field("reportTitle", "Report title")}
-        {field("territoryLabel", "Territory row label")}
-        {field("routeLabel", "Route row label")}
-        {field("totalLabel", "Total sale value label")}
-        {field("dateLabel", "Last visit date label")}
-
-        <h3 className="text-sm font-semibold tracking-wide uppercase text-stone-500 mb-4 mt-8">Table column headers</h3>
-        <div className="grid grid-cols-2 gap-x-4">
-          {field("colNo", "Column 1")}
-          {field("colOutlet", "Column 2")}
-          {field("colProduct", "Column 3")}
-          {field("colQty", "Column 4")}
-        </div>
-
-        <h3 className="text-sm font-semibold tracking-wide uppercase text-stone-500 mb-4 mt-4">Accent color</h3>
-        <div className="flex gap-2 mb-6">
-          {ACCENTS.map((a) => (
-            <button
-              key={a.value}
-              onClick={() => setTemplate({ ...template, accent: a.value })}
-              title={a.name}
-              className="w-8 h-8 rounded-full border-2 transition-transform hover:scale-110"
-              style={{ backgroundColor: a.value, borderColor: template.accent === a.value ? "#1c1917" : "transparent" }}
-            />
-          ))}
-        </div>
-
-        <button onClick={onReset} className="flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-800">
-          <RotateCcw size={14} /> Reset to defaults
-        </button>
-      </div>
-
-      <div>
-        <h3 className="text-sm font-semibold tracking-wide uppercase text-stone-500 mb-4">Live preview</h3>
-        <div className="border border-stone-300 rounded-lg overflow-hidden shadow-sm bg-white">
-          <div className="px-5 py-4" style={{ backgroundColor: template.accent }}>
-            <p className="text-white text-center font-semibold" style={{ fontFamily: template.titleFont }}>{template.reportTitle}</p>
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+      <section className="lg:col-span-5 flex flex-col gap-5">
+        <div className="rounded-lg p-6" style={{ background: T.surface, border: `1px solid ${T.border}`, boxShadow: "0px 4px 12px rgba(74,71,67,0.05)" }}>
+          <div className="pb-4 mb-6" style={{ borderBottom: `1px solid ${T.border}` }}>
+            <h2 style={{ fontFamily: T.headFont, fontSize: 18, fontWeight: 700, color: template.accent }}>Report Configuration</h2>
+            <p className="text-sm mt-1" style={{ color: T.textMuted, fontFamily: T.bodyFont }}>Customize your template's layout and metadata labels.</p>
           </div>
-          <div className="px-5 py-4 text-sm" style={{ fontFamily: template.bodyFont }}>
-            <div className="grid grid-cols-[140px_1fr] gap-y-1.5">
-              <span className="font-bold text-stone-700">{template.territoryLabel}</span><span className="text-stone-600">Nikaweratiya</span>
-              <span className="font-bold text-stone-700">{template.routeLabel}</span><span className="text-stone-600">Anamaduwa to Galkulama</span>
-              <span className="font-bold text-stone-700">{template.totalLabel}</span><span className="text-stone-600">110,409.00</span>
-              <span className="font-bold text-stone-700">{template.dateLabel}</span><span className="text-stone-600 italic">(fill in after download)</span>
+
+          <div className="space-y-5">
+            <div>
+              <Label>Report title</Label>
+              <TextField {...field("reportTitle")} />
             </div>
-            <table className="w-full mt-4 text-xs border-t border-stone-200">
-              <thead>
-                <tr style={{ color: template.accent }} className="border-b-2" >
-                  <th className="text-left py-1.5 font-bold" style={{ borderColor: template.accent }}>{template.colNo}</th>
-                  <th className="text-left py-1.5 font-bold">{template.colOutlet}</th>
-                  <th className="text-left py-1.5 font-bold">{template.colProduct}</th>
-                  <th className="text-left py-1.5 font-bold">{template.colQty}</th>
-                </tr>
-              </thead>
-              <tbody className="text-stone-600">
-                <tr className="border-b border-stone-100"><td className="py-1">1</td><td className="py-1">JANAKA KARAWALA KADE</td><td className="py-1">Black Chicken 90g</td><td className="py-1">15</td></tr>
-                <tr className="border-b border-stone-100"><td className="py-1"></td><td className="py-1"></td><td className="py-1">Sago Seed 100g</td><td className="py-1">20</td></tr>
-              </tbody>
-            </table>
+            <div className="grid grid-cols-2 gap-4">
+              <div><Label>Territory label</Label><TextField {...field("territoryLabel")} /></div>
+              <div><Label>Route label</Label><TextField {...field("routeLabel")} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div><Label>Total sale label</Label><TextField {...field("totalLabel")} /></div>
+              <div><Label>Last visit label</Label><TextField {...field("dateLabel")} /></div>
+            </div>
+          </div>
+
+          <div className="pt-5">
+            <Label>Table column headers</Label>
+            <div className="grid grid-cols-2 gap-4">
+              <TextField {...field("colNo")} />
+              <TextField {...field("colOutlet")} />
+              <TextField {...field("colProduct")} />
+              <TextField {...field("colQty")} />
+            </div>
+          </div>
+
+          <div className="pt-5 mt-5" style={{ borderTop: `1px solid ${T.border}` }}>
+            <Label>Brand accent color</Label>
+            <div className="flex items-center gap-3">
+              {ACCENTS.map((a) => (
+                <button
+                  key={a.value}
+                  onClick={() => setTemplate({ ...template, accent: a.value })}
+                  title={a.name}
+                  className="w-8 h-8 rounded-full cursor-pointer transition-transform hover:scale-110"
+                  style={{
+                    backgroundColor: a.value,
+                    outline: template.accent === a.value ? `2px solid ${T.text}` : "none",
+                    outlineOffset: "2px",
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="pt-6 flex items-center justify-between">
+            <button onClick={onReset} className="flex items-center gap-1.5 text-sm transition-colors" style={{ color: T.textMuted, fontFamily: T.bodyFont }}>
+              <Icon name="restart_alt" size={18} /> Reset to defaults
+            </button>
+            <button
+              onClick={handleSave}
+              className="px-6 py-2.5 rounded-lg font-bold text-sm transition-all active:scale-[0.98]"
+              style={{ background: template.accent, color: "#fff", fontFamily: T.bodyFont, boxShadow: "0 2px 6px rgba(0,0,0,0.15)" }}
+            >
+              {saved ? "Saved ✓" : "Save Template"}
+            </button>
           </div>
         </div>
-        <p className="text-xs text-stone-400 mt-3">This layout is saved automatically and used every time you generate a report on the Dashboard tab.</p>
-      </div>
+      </section>
+
+      <section className="lg:col-span-7">
+        <div className="sticky top-5">
+          <Label>Live preview (real-time)</Label>
+          <div className="rounded-lg overflow-hidden flex flex-col min-h-[560px]" style={{ background: T.surface, border: "1px solid #D9D1C7", boxShadow: "0px 12px 24px rgba(74,71,67,0.12)" }}>
+            <div className="p-6" style={{ background: template.accent, color: "#fff" }}>
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 style={{ fontFamily: T.headFont, fontSize: 22, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.02em" }}>{template.reportTitle}</h3>
+                  <p className="text-sm opacity-80 mt-1" style={{ fontFamily: T.bodyFont }}>Outlet-wise breakdown for the most recent visit</p>
+                </div>
+                <div className="text-right">
+                  <p style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.1em", opacity: 0.75 }}>{template.dateLabel.toUpperCase()}</p>
+                  <p className="font-bold" style={{ fontFamily: T.bodyFont }}>{previewData.lastVisitDate || "—"}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 flex-1">
+              <div className="grid grid-cols-2 gap-6 pb-6 mb-6" style={{ borderBottom: `1px solid ${T.border}` }}>
+                <div className="space-y-4">
+                  <div>
+                    <p style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{template.territoryLabel.toUpperCase()}</p>
+                    <p className="font-semibold" style={{ fontFamily: T.bodyFont }}>{previewData.territory || "—"}</p>
+                  </div>
+                  <div>
+                    <p style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{template.routeLabel.toUpperCase()}</p>
+                    <p className="font-semibold" style={{ fontFamily: T.bodyFont }}>{previewData.routeName || "—"}</p>
+                  </div>
+                </div>
+                <div className="space-y-4">
+                  <div>
+                    <p style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{template.totalLabel.toUpperCase()}</p>
+                    <p className="font-bold" style={{ fontFamily: T.headFont, fontSize: 18, color: template.accent }}>{previewData.totalSale}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <h4 style={{ fontFamily: T.capsFont, fontSize: 11, letterSpacing: "0.1em", color: T.textMuted }}>OUTLET DATA SUMMARY</h4>
+                <table className="w-full border-collapse text-sm" style={{ fontFamily: T.bodyFont }}>
+                  <thead>
+                    <tr style={{ background: T.surfaceContainer, borderTop: `2px solid ${template.accent}`, textAlign: "left" }}>
+                      <th className="p-2.5" style={{ fontFamily: T.capsFont, fontSize: 10 }}>{template.colNo}</th>
+                      <th className="p-2.5" style={{ fontFamily: T.capsFont, fontSize: 10 }}>{template.colOutlet}</th>
+                      <th className="p-2.5" style={{ fontFamily: T.capsFont, fontSize: 10 }}>{template.colProduct}</th>
+                      <th className="p-2.5 text-right" style={{ fontFamily: T.capsFont, fontSize: 10 }}>{template.colQty}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {previewData.sampleRows.map((row, i) => (
+                      <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
+                        <td className="p-2.5">{row.no}</td>
+                        <td className="p-2.5">{row.outlet}</td>
+                        <td className="p-2.5">{row.product}</td>
+                        <td className="p-2.5 text-right">{row.qty}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          <p className="text-xs mt-3" style={{ color: T.textMuted, fontFamily: T.bodyFont }}>Saved automatically, and used every time you generate a report on the Dashboard.</p>
+        </div>
+      </section>
     </div>
   );
 }
@@ -222,6 +336,7 @@ export default function App() {
   const [routeName, setRouteName] = useState("");
   const [lastVisitDate, setLastVisitDate] = useState("");
   const [strategy, setStrategy] = useState("fallback");
+  const [page, setPage] = useState(0);
 
   const fileInputRef = useRef(null);
 
@@ -229,17 +344,16 @@ export default function App() {
     try {
       const saved = localStorage.getItem("template-config");
       if (saved) setTemplate({ ...DEFAULT_TEMPLATE, ...JSON.parse(saved) });
-    } catch (e) {
-      // no saved config yet
-    } finally {
-      setTemplateLoaded(true);
-    }
+    } catch (e) {}
+    finally { setTemplateLoaded(true); }
   }, []);
 
   useEffect(() => {
     if (!templateLoaded) return;
     try { localStorage.setItem("template-config", JSON.stringify(template)); } catch (e) {}
   }, [template, templateLoaded]);
+
+  useEffect(() => { setPage(0); }, [territory, routeName, strategy]);
 
   const territories = useMemo(() => {
     if (!rows) return [];
@@ -255,6 +369,9 @@ export default function App() {
     if (!rows || !territory) return null;
     return buildReport(rows, territory, routeName, strategy);
   }, [rows, territory, routeName, strategy]);
+
+  const pageCount = report ? Math.max(1, Math.ceil(report.outlets.length / PAGE_SIZE)) : 1;
+  const pagedOutlets = report ? report.outlets.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE) : [];
 
   function handleFile(file) {
     setParseError(null);
@@ -278,6 +395,16 @@ export default function App() {
       }
     };
     reader.readAsArrayBuffer(file);
+  }
+
+  function resetFilters() {
+    if (!rows) return;
+    const firstTerritory = territories[0] || "";
+    setTerritory(firstTerritory);
+    const firstRoute = [...new Set(rows.filter((r) => r.territory === firstTerritory).map((r) => r.routeName))].sort()[0] || "";
+    setRouteName(firstRoute);
+    setLastVisitDate("");
+    setStrategy("fallback");
   }
 
   async function exportExcel() {
@@ -372,13 +499,13 @@ export default function App() {
     win.document.write(`
       <html><head><title>${territory} - ${routeName}</title>
       <style>
-        body{font-family:${template.bodyFont};color:#292524;padding:32px;}
-        h1{font-family:${template.titleFont};text-align:center;color:white;background:${template.accent};padding:14px;border-radius:6px;font-size:18px;margin-bottom:20px;}
+        body{font-family:${T.bodyFont};color:${T.text};padding:32px;}
+        h1{font-family:${T.headFont};text-align:center;color:white;background:${template.accent};padding:14px;border-radius:6px;font-size:18px;margin-bottom:20px;}
         table{width:100%;border-collapse:collapse;margin-top:16px;font-size:12px;}
         th{text-align:left;border-bottom:2px solid ${template.accent};color:${template.accent};padding:6px 8px;}
         td{padding:5px 8px;border-bottom:1px solid #eee;}
         .meta{display:grid;grid-template-columns:160px 1fr;row-gap:6px;font-size:13px;}
-        .meta b{color:#44403c;}
+        .meta b{color:${T.textMuted};}
         @media print{ body{padding:0;} }
       </style></head><body>
       <h1>${template.reportTitle}</h1>
@@ -396,153 +523,208 @@ export default function App() {
     setTimeout(() => win.print(), 350);
   }
 
+  const previewData = report
+    ? {
+        territory,
+        routeName,
+        lastVisitDate,
+        totalSale: report.totalSale.toLocaleString(undefined, { minimumFractionDigits: 2 }),
+        sampleRows: report.outlets.slice(0, 2).flatMap((o, oi) =>
+          o.items.slice(0, oi === 0 ? 2 : 1).map((it, i) => ({ no: i === 0 ? oi + 1 : "", outlet: i === 0 ? o.name : "", product: it.product, qty: it.qty }))
+        ),
+      }
+    : { territory: "Nikaweratiya", routeName: "Anamaduwa to Galkulama", lastVisitDate: "", totalSale: "110,409.00", sampleRows: [{ no: 1, outlet: "Janaka Karawala Kade", product: "Black Chicken 90g", qty: 15 }, { no: "", outlet: "", product: "Sago Seed 100g", qty: 20 }] };
+
+  const canExport = report && report.outlets.length > 0;
+
   return (
-    <div className="min-h-screen bg-stone-100" style={{ fontFamily: template.bodyFont }}>
-      <div className="border-b border-stone-300 bg-white">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded flex items-center justify-center text-white" style={{ backgroundColor: template.accent }}>
-              <FileSpreadsheet size={17} />
-            </div>
-            <span className="font-semibold text-stone-800" style={{ fontFamily: template.titleFont }}>Route Sales Report Builder</span>
+    <div className="min-h-screen" style={{ background: T.bg, fontFamily: T.bodyFont, color: T.text }}>
+      <header style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
+        <div className="max-w-[1280px] mx-auto px-6 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded flex items-center justify-center text-white font-bold" style={{ background: template.accent, fontFamily: T.headFont }}>R</div>
+            <h1 style={{ fontFamily: T.headFont, fontSize: 18, fontWeight: 700, color: template.accent }}>Route Sales Report Builder</h1>
           </div>
-          <nav className="flex gap-1 bg-stone-100 rounded-lg p-1">
+          <nav className="rounded-full p-1 flex items-center gap-1" style={{ background: T.surfaceLow, boxShadow: "inset 0 1px 2px rgba(0,0,0,0.04)" }}>
             <button
               onClick={() => setScreen("dashboard")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${screen === "dashboard" ? "bg-white shadow-sm text-stone-900" : "text-stone-500 hover:text-stone-700"}`}
+              className="px-4 py-1.5 rounded-full text-sm font-semibold transition-colors"
+              style={{ fontFamily: T.capsFont, fontSize: 12, letterSpacing: "0.06em", background: screen === "dashboard" ? template.accent : "transparent", color: screen === "dashboard" ? "#fff" : T.textMuted }}
             >
-              <LayoutDashboard size={15} /> Dashboard
+              DASHBOARD
             </button>
             <button
               onClick={() => setScreen("template")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${screen === "template" ? "bg-white shadow-sm text-stone-900" : "text-stone-500 hover:text-stone-700"}`}
+              className="px-4 py-1.5 rounded-full text-sm font-semibold transition-colors"
+              style={{ fontFamily: T.capsFont, fontSize: 12, letterSpacing: "0.06em", background: screen === "template" ? template.accent : "transparent", color: screen === "template" ? "#fff" : T.textMuted }}
             >
-              <Settings2 size={15} /> Template Editor
+              TEMPLATE EDITOR
             </button>
           </nav>
+          <div className="flex items-center gap-4">
+            <button onClick={exportExcel} disabled={!canExport} title="Download Excel" style={{ color: template.accent, opacity: canExport ? 1 : 0.35, cursor: canExport ? "pointer" : "default" }}>
+              <Icon name="download" />
+            </button>
+            <button onClick={exportPdf} disabled={!canExport} title="Download PDF" style={{ color: template.accent, opacity: canExport ? 1 : 0.35, cursor: canExport ? "pointer" : "default" }}>
+              <Icon name="picture_as_pdf" />
+            </button>
+            <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ background: template.accent, border: `1px solid ${T.border}` }}>RT</div>
+          </div>
         </div>
-      </div>
+      </header>
 
-      <div className="max-w-6xl mx-auto px-6 py-8">
+      <main className="max-w-[1280px] mx-auto px-6 py-8">
         {screen === "template" ? (
-          <TemplateEditor template={template} setTemplate={setTemplate} onReset={() => setTemplate(DEFAULT_TEMPLATE)} />
+          <TemplateEditor template={template} setTemplate={setTemplate} onReset={() => setTemplate(DEFAULT_TEMPLATE)} previewData={previewData} />
         ) : (
-          <div className="grid lg:grid-cols-[340px_1fr] gap-8">
-            <div>
-              <div className="bg-white border border-stone-300 rounded-lg p-5">
-                <h2 className="text-sm font-semibold tracking-wide uppercase text-stone-500 mb-3">1. Upload master report</h2>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            <div className="lg:col-span-4 flex flex-col gap-5">
+              <div className="rounded-lg p-5" style={{ background: T.surface, border: `1px solid ${T.border}` }}>
+                <Label>Step 1: Upload master report</Label>
                 <div
                   onClick={() => fileInputRef.current?.click()}
                   onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); }}
                   onDragOver={(e) => e.preventDefault()}
-                  className="border-2 border-dashed border-stone-300 rounded-lg p-6 text-center cursor-pointer hover:border-stone-400 transition-colors"
+                  className="rounded-lg p-6 text-center cursor-pointer transition-colors"
+                  style={{ border: `2px dashed ${T.border}` }}
                 >
-                  <Upload size={22} className="mx-auto mb-2 text-stone-400" />
-                  <p className="text-sm text-stone-600">{fileName || "Drop the Route Wise Item Wise Outlet Wise Sales Report .xlsx here, or click to browse"}</p>
+                  <Icon name="cloud_upload" size={30} style={{ color: T.textMuted }} />
+                  <p className="text-sm font-semibold mt-2">{fileName || "Drop file here or click"}</p>
+                  <p className="text-xs mt-1" style={{ color: T.textMuted }}>Route Wise Item Wise Outlet Wise Sales Report (.xlsx)</p>
                   <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => e.target.files[0] && handleFile(e.target.files[0])} />
                 </div>
                 {parseError && (
-                  <p className="mt-3 text-sm text-red-600 flex items-start gap-1.5"><CircleAlert size={16} className="shrink-0 mt-0.5" />{parseError}</p>
+                  <p className="mt-3 text-sm flex items-start gap-1.5" style={{ color: "#ba1a1a" }}><Icon name="error" size={16} />{parseError}</p>
                 )}
                 {rows && !parseError && (
-                  <p className="mt-3 text-sm text-emerald-700 flex items-center gap-1.5"><CircleCheck size={16} />{rows.length} outlet/product rows found across {territories.length} territor{territories.length === 1 ? "y" : "ies"}</p>
+                  <p className="mt-3 text-sm flex items-center gap-1.5" style={{ color: "#2E7A4E" }}><Icon name="check_circle" size={16} />{rows.length} rows found across {territories.length} territor{territories.length === 1 ? "y" : "ies"}</p>
                 )}
               </div>
 
               {rows && (
-                <div className="bg-white border border-stone-300 rounded-lg p-5 mt-5">
-                  <h2 className="text-sm font-semibold tracking-wide uppercase text-stone-500 mb-3">2. Choose territory &amp; route</h2>
-                  <label className="block mb-3">
-                    <span className="block text-xs text-stone-500 mb-1">Territory</span>
-                    <select className="w-full border border-stone-300 rounded-md px-2.5 py-2 text-sm" value={territory} onChange={(e) => { setTerritory(e.target.value); setRouteName(""); }}>
-                      {territories.map((t) => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </label>
-                  <label className="block mb-3">
-                    <span className="block text-xs text-stone-500 mb-1">Route (auto-extracted from the file)</span>
-                    <select className="w-full border border-stone-300 rounded-md px-2.5 py-2 text-sm" value={routeName} onChange={(e) => setRouteName(e.target.value)}>
-                      {routesForTerritory.map((r) => <option key={r} value={r}>{r || "(blank route name)"}</option>)}
-                    </select>
-                  </label>
-                  <label className="block mb-3">
-                    <span className="block text-xs text-stone-500 mb-1">Last visit date</span>
-                    <input type="date" className="w-full border border-stone-300 rounded-md px-2.5 py-2 text-sm" value={lastVisitDate} onChange={(e) => setLastVisitDate(e.target.value)} />
-                  </label>
-                  <label className="block">
-                    <span className="block text-xs text-stone-500 mb-1">Which visit counts as "last"?</span>
-                    <select className="w-full border border-stone-300 rounded-md px-2.5 py-2 text-sm" value={strategy} onChange={(e) => setStrategy(e.target.value)}>
-                      <option value="fallback">Most recent visit with data (1st → 4th)</option>
-                      <option value="strict">Only PREVIOUS 1ST VISIT column</option>
-                    </select>
-                  </label>
+                <div className="rounded-lg p-5" style={{ background: T.surface, border: `1px solid ${T.border}` }}>
+                  <Label>Step 2: Choose territory &amp; route</Label>
+                  <div className="space-y-4 mt-1">
+                    <div>
+                      <span className="block text-xs mb-1" style={{ color: T.textMuted }}>Territory</span>
+                      <Select value={territory} onChange={(e) => { setTerritory(e.target.value); setRouteName(""); }}>
+                        {territories.map((t) => <option key={t} value={t}>{t}</option>)}
+                      </Select>
+                    </div>
+                    <div>
+                      <span className="block text-xs mb-1" style={{ color: T.textMuted }}>Route (auto-extracted from file)</span>
+                      <Select value={routeName} onChange={(e) => setRouteName(e.target.value)}>
+                        {routesForTerritory.map((r) => <option key={r} value={r}>{r || "(blank route name)"}</option>)}
+                      </Select>
+                    </div>
+                    <div>
+                      <span className="block text-xs mb-1" style={{ color: T.textMuted }}>Last visit date</span>
+                      <input type="date" className="w-full rounded-md px-2.5 py-2 text-sm outline-none" style={{ background: T.surface, border: `1px solid ${T.border}` }} value={lastVisitDate} onChange={(e) => setLastVisitDate(e.target.value)} />
+                    </div>
+                    <div>
+                      <span className="block text-xs mb-1" style={{ color: T.textMuted }}>Which visit counts as "last"?</span>
+                      <Select value={strategy} onChange={(e) => setStrategy(e.target.value)}>
+                        <option value="fallback">Most recent visit with data</option>
+                        <option value="strict">Only PREVIOUS 1ST VISIT column</option>
+                      </Select>
+                    </div>
+                  </div>
+                  <button
+                    onClick={resetFilters}
+                    className="w-full mt-5 py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
+                    style={{ background: T.surfaceContainer, color: T.text, fontFamily: T.bodyFont }}
+                  >
+                    <Icon name="restart_alt" size={16} /> Reset Filters
+                  </button>
                 </div>
               )}
             </div>
 
-            <div>
+            <div className="lg:col-span-8">
               {!rows ? (
-                <div className="h-full flex items-center justify-center text-stone-400 text-sm border-2 border-dashed border-stone-200 rounded-lg py-24">
-                  Upload a report to see the outlet-wise breakdown here
+                <div className="h-full flex flex-col items-center justify-center text-sm py-24 rounded-lg" style={{ border: `2px dashed ${T.border}`, color: T.textMuted }}>
+                  <Icon name="table_chart" size={28} style={{ color: T.textMuted }} />
+                  <p className="mt-2">Upload a report to see the outlet-wise breakdown here</p>
                 </div>
               ) : (
-                <div className="bg-white border border-stone-300 rounded-lg overflow-hidden">
-                  <div className="px-5 py-4 flex items-center justify-between" style={{ backgroundColor: template.accent }}>
+                <div className="rounded-lg overflow-hidden" style={{ background: T.surface, border: `1px solid ${T.border}` }}>
+                  <div className="p-6 flex items-center justify-between" style={{ background: template.accent }}>
                     <div>
-                      <p className="text-white font-semibold" style={{ fontFamily: template.titleFont }}>{template.reportTitle}</p>
-                      <p className="text-white/80 text-xs mt-0.5">{territory}{routeName ? ` — ${routeName}` : ""}</p>
+                      <h2 style={{ fontFamily: T.headFont, fontSize: 22, fontWeight: 700, color: "#fff" }}>{template.reportTitle}</h2>
+                      <p className="text-sm opacity-85 mt-1" style={{ color: "#fff" }}>{territory}{routeName ? ` — ${routeName}` : ""}</p>
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={exportExcel} disabled={!report || report.outlets.length === 0} className="flex items-center gap-1.5 bg-white/95 hover:bg-white disabled:opacity-40 text-stone-800 text-xs font-medium px-3 py-1.5 rounded-md">
-                        <Download size={13} /> Excel
+                      <button onClick={exportExcel} disabled={!canExport} className="flex items-center gap-1.5 disabled:opacity-40 text-xs font-bold px-3.5 py-2 rounded-lg" style={{ background: "#fff", color: template.accent }}>
+                        <Icon name="grid_on" size={15} /> Download Excel
                       </button>
-                      <button onClick={exportPdf} disabled={!report || report.outlets.length === 0} className="flex items-center gap-1.5 bg-white/95 hover:bg-white disabled:opacity-40 text-stone-800 text-xs font-medium px-3 py-1.5 rounded-md">
-                        <FileDown size={13} /> PDF
+                      <button onClick={exportPdf} disabled={!canExport} className="flex items-center gap-1.5 disabled:opacity-40 text-xs font-bold px-3.5 py-2 rounded-lg" style={{ background: "rgba(0,0,0,0.2)", color: "#fff" }}>
+                        <Icon name="picture_as_pdf" size={15} /> Download PDF
                       </button>
                     </div>
                   </div>
 
                   {report && (
-                    <div className="px-5 py-3 border-b border-stone-100 grid grid-cols-3 gap-4 text-sm bg-stone-50">
-                      <div><span className="text-stone-400 text-xs block">{template.totalLabel}</span><span className="font-semibold text-stone-800">{report.totalSale.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
-                      <div><span className="text-stone-400 text-xs block">Outlets with last-visit sales</span><span className="font-semibold text-stone-800">{report.outlets.length}</span></div>
-                      <div><span className="text-stone-400 text-xs block">Rows considered / matched</span><span className="font-semibold text-stone-800">{report.consideredRows} / {report.matchedRows}</span></div>
+                    <div className="p-5 grid grid-cols-3 gap-4" style={{ borderBottom: `1px solid ${T.border}` }}>
+                      <div className="rounded-lg p-4" style={{ border: `1px solid ${T.border}` }}>
+                        <p style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{template.totalLabel.toUpperCase()}</p>
+                        <p style={{ fontFamily: T.headFont, fontSize: 22, fontWeight: 700, color: template.accent }} className="mt-1">{report.totalSale.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                      </div>
+                      <div className="rounded-lg p-4" style={{ border: `1px solid ${T.border}` }}>
+                        <p style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>OUTLETS</p>
+                        <p style={{ fontFamily: T.headFont, fontSize: 22, fontWeight: 700 }} className="mt-1">{report.outlets.length}</p>
+                      </div>
+                      <div className="rounded-lg p-4" style={{ border: `1px solid ${T.border}` }}>
+                        <p style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>ROWS MATCHED</p>
+                        <p style={{ fontFamily: T.headFont, fontSize: 22, fontWeight: 700 }} className="mt-1">{report.matchedRows} / {report.consideredRows}</p>
+                      </div>
                     </div>
                   )}
 
                   {report && report.outlets.length === 0 && (
-                    <p className="px-5 py-8 text-sm text-stone-500 text-center">No rows had quantity in the selected "last visit" column for this route. Try the fallback strategy, or double-check the route.</p>
+                    <p className="px-5 py-10 text-sm text-center" style={{ color: T.textMuted }}>No rows had quantity in the selected "last visit" column for this route. Try the other strategy, or double-check the route.</p>
                   )}
 
                   {report && report.outlets.length > 0 && (
-                    <div className="max-h-[560px] overflow-y-auto">
+                    <>
                       <table className="w-full text-sm">
-                        <thead className="sticky top-0 bg-white border-b border-stone-200">
-                          <tr style={{ color: template.accent }}>
-                            <th className="text-left px-5 py-2 font-semibold text-xs w-10">{template.colNo}</th>
-                            <th className="text-left px-2 py-2 font-semibold text-xs">{template.colOutlet}</th>
-                            <th className="text-left px-2 py-2 font-semibold text-xs">{template.colProduct}</th>
-                            <th className="text-right px-5 py-2 font-semibold text-xs">{template.colQty}</th>
+                        <thead style={{ background: T.surfaceContainer, borderTop: `2px solid ${template.accent}` }}>
+                          <tr>
+                            <th className="text-left px-5 py-2.5 w-12" style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{template.colNo}</th>
+                            <th className="text-left px-3 py-2.5" style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{template.colOutlet}</th>
+                            <th className="text-left px-3 py-2.5" style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{template.colProduct}</th>
+                            <th className="text-right px-5 py-2.5" style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{template.colQty}</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {report.outlets.map((outlet, idx) => outlet.items.map((item, i) => (
-                            <tr key={`${idx}-${i}`} className="border-b border-stone-50 hover:bg-stone-50">
-                              <td className="px-5 py-1.5 text-stone-400">{i === 0 ? idx + 1 : ""}</td>
-                              <td className="px-2 py-1.5 font-medium text-stone-700">{i === 0 ? outlet.name : ""}</td>
-                              <td className="px-2 py-1.5 text-stone-600">{item.product}</td>
-                              <td className="px-5 py-1.5 text-right text-stone-700 tabular-nums">{item.qty}</td>
+                          {pagedOutlets.map((outlet, idx) => outlet.items.map((item, i) => (
+                            <tr key={`${idx}-${i}`} style={{ borderBottom: `1px solid ${T.border}` }}>
+                              <td className="px-5 py-2 align-top" style={{ color: T.textMuted }}>{i === 0 ? String(page * PAGE_SIZE + idx + 1).padStart(2, "0") : ""}</td>
+                              <td className="px-3 py-2 align-top font-semibold">{i === 0 ? outlet.name : ""}</td>
+                              <td className="px-3 py-2">{item.product}</td>
+                              <td className="px-5 py-2 text-right tabular-nums">{item.qty}</td>
                             </tr>
                           )))}
                         </tbody>
                       </table>
-                    </div>
+                      <div className="flex items-center justify-between px-5 py-4 text-sm" style={{ color: T.textMuted, borderTop: `1px solid ${T.border}` }}>
+                        <span>Showing {page * PAGE_SIZE + 1}-{Math.min((page + 1) * PAGE_SIZE, report.outlets.length)} of {report.outlets.length} outlets</span>
+                        <div className="flex gap-2">
+                          <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0} className="w-8 h-8 rounded-md flex items-center justify-center disabled:opacity-30" style={{ border: `1px solid ${T.border}` }}>
+                            <Icon name="chevron_left" size={18} />
+                          </button>
+                          <button onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))} disabled={page >= pageCount - 1} className="w-8 h-8 rounded-md flex items-center justify-center disabled:opacity-30" style={{ border: `1px solid ${T.border}` }}>
+                            <Icon name="chevron_right" size={18} />
+                          </button>
+                        </div>
+                      </div>
+                    </>
                   )}
                 </div>
               )}
             </div>
           </div>
         )}
-      </div>
+      </main>
     </div>
   );
 }
