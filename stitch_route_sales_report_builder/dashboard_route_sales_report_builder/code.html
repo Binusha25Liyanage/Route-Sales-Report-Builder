@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Route Sales Report Builder - Dashboard</title>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700&family=Work+Sans:wght@400;500&family=IBM+Plex+Sans:wght@600&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@100..900&family=Manrope:wght@100..900&family=Work+Sans:wght@100..900&display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "primary-fixed-dim": "#ffb3b4",
+                        "error-container": "#ffdad6",
+                        "tertiary": "#35312a",
+                        "on-tertiary-container": "#bcb5ab",
+                        "outline-variant": "#dac1c0",
+                        "on-primary-container": "#ff999c",
+                        "inverse-primary": "#ffb3b4",
+                        "on-secondary": "#ffffff",
+                        "surface-container-highest": "#e5e2dd",
+                        "surface-dim": "#dcdad5",
+                        "on-surface": "#1c1c19",
+                        "tertiary-fixed": "#eae1d7",
+                        "on-secondary-fixed-variant": "#494642",
+                        "on-primary-fixed": "#3f020b",
+                        "on-background": "#1c1c19",
+                        "primary-container": "#7a2e33",
+                        "on-tertiary": "#ffffff",
+                        "on-primary": "#ffffff",
+                        "surface-bright": "#fcf9f4",
+                        "background": "#fcf9f4",
+                        "error": "#ba1a1a",
+                        "on-primary-fixed-variant": "#792d33",
+                        "surface": "#fcf9f4",
+                        "outline": "#877272",
+                        "secondary-container": "#e5dfd9",
+                        "on-error-container": "#93000a",
+                        "surface-variant": "#e5e2dd",
+                        "on-tertiary-fixed": "#1f1b15",
+                        "on-error": "#ffffff",
+                        "secondary-fixed": "#e7e1dc",
+                        "primary": "#5d181e",
+                        "tertiary-container": "#4c473f",
+                        "secondary-fixed-dim": "#cbc6c0",
+                        "on-surface-variant": "#544242",
+                        "secondary": "#615e59",
+                        "inverse-on-surface": "#f3f0eb",
+                        "on-tertiary-fixed-variant": "#4b463f",
+                        "primary-fixed": "#ffdad9",
+                        "inverse-surface": "#31302d",
+                        "surface-container-lowest": "#ffffff",
+                        "surface-tint": "#974449",
+                        "surface-container": "#f0ede9",
+                        "surface-container-high": "#ebe8e3",
+                        "surface-container-low": "#f6f3ee",
+                        "on-secondary-fixed": "#1d1b18",
+                        "tertiary-fixed-dim": "#cdc5bc",
+                        "on-secondary-container": "#66625e"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "16px",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "container-margin": "40px",
+                        "lg": "24px",
+                        "md": "16px",
+                        "gutter": "20px",
+                        "xl": "32px",
+                        "base": "4px",
+                        "xs": "4px",
+                        "sm": "8px"
+                    },
+                    "fontFamily": {
+                        "body-md": ["Work Sans"],
+                        "body-sm": ["Work Sans"],
+                        "body-lg": ["Work Sans"],
+                        "table-numeric": ["Work Sans"],
+                        "headline-lg": ["Manrope"],
+                        "headline-md": ["Manrope"],
+                        "headline-sm": ["Manrope"],
+                        "label-caps": ["IBM Plex Sans"]
+                    },
+                    "fontSize": {
+                        "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "body-sm": ["12px", {"lineHeight": "16px", "fontWeight": "400"}],
+                        "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                        "table-numeric": ["14px", {"lineHeight": "20px", "fontWeight": "500"}],
+                        "headline-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                        "headline-md": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                        "headline-sm": ["18px", {"lineHeight": "24px", "fontWeight": "600"}],
+                        "label-caps": ["11px", {"lineHeight": "16px", "letterSpacing": "0.1em", "fontWeight": "600"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            display: inline-block;
+            vertical-align: middle;
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f0ede9;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #dac1c0;
+            border-radius: 10px;
+        }
+        .sticky-table-header {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface font-body-md min-h-screen flex flex-col">
+<!-- Top Navigation Bar -->
+<header class="bg-surface border-b border-outline-variant shadow-sm z-50">
+<div class="flex justify-between items-center w-full px-lg h-16 max-w-[1280px] mx-auto">
+<div class="flex items-center gap-md">
+<img alt="Route Sales Report Builder Logo" class="h-8 w-auto" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA_DUnJpT3Sc23WkgPXHAYQ6Rbx1qtaDIt0UvxLN9_09guwsuqyvrDkc0s6L1hcBwH3Hj6flYZCy7FBFDAJlXb0yDP00SdZhBb66JJXmso3d2MDKpA20MjzMrkMSumfEldMbcE2deXmU9mIoBcr6Wg8Dub6453qqucqZTLpzH-4UljsEskiCSMh_4nhFpOV7ZvKf5apQA2q1BVj7yKeiPfLxDQKroA1QUUCe2sB83tSB1CNggbfZ07uFS-V4G9ZbzD3XOP15qckKX1a"/>
+<span class="font-headline-sm text-headline-sm font-bold text-primary">Route Sales Report Builder</span>
+</div>
+<div class="hidden md:flex items-center gap-sm bg-surface-container-low p-1 rounded-full border border-outline-variant">
+<button class="px-md py-1.5 rounded-full text-primary border-b-2 border-primary pb-1 font-bold transition-colors duration-200">Dashboard</button>
+<button class="px-md py-1.5 rounded-full text-on-surface-variant font-medium hover:text-primary transition-colors duration-200">Template Editor</button>
+</div>
+<div class="flex items-center gap-md">
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer hover:text-primary transition-colors">download</span>
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer hover:text-primary transition-colors">picture_as_pdf</span>
+<div class="w-8 h-8 rounded-full bg-primary-container flex items-center justify-center text-on-primary">
+<span class="material-symbols-outlined text-[20px]">person</span>
+</div>
+</div>
+</div>
+</header>
+<div class="flex-1 flex overflow-hidden max-w-[1280px] mx-auto w-full">
+<!-- Sidebar -->
+<aside class="w-[340px] bg-surface-container border-r border-outline-variant flex flex-col p-lg custom-scrollbar overflow-y-auto">
+<div class="space-y-xl">
+<!-- Step 1: Upload -->
+<section>
+<h3 class="font-label-caps text-label-caps text-on-surface-variant mb-md uppercase tracking-widest">Step 1: Upload master report</h3>
+<div class="border-2 border-dashed border-outline-variant rounded-lg p-lg bg-surface-container-lowest hover:bg-surface-container-low transition-all cursor-pointer group text-center">
+<span class="material-symbols-outlined text-[48px] text-outline mb-sm group-hover:text-primary-container">cloud_upload</span>
+<p class="font-body-md text-on-surface font-semibold">Drop file here or click</p>
+<p class="font-body-sm text-on-surface-variant mt-xs">Support for .xlsx, .csv (Max 50MB)</p>
+</div>
+</section>
+<!-- Step 2: Configuration -->
+<section class="space-y-lg">
+<h3 class="font-label-caps text-label-caps text-on-surface-variant mb-md uppercase tracking-widest">Step 2: Choose territory & route</h3>
+<div class="space-y-md">
+<div>
+<label class="font-label-caps text-label-caps mb-xs block text-on-surface-variant">Territory</label>
+<select class="w-full bg-surface-container-lowest border border-outline-variant rounded-md px-md py-sm text-body-md focus:ring-2 focus:ring-primary-container outline-none transition-shadow">
+<option>Northern Metro</option>
+<option>Eastern Industrial</option>
+<option>Central Business District</option>
+</select>
+</div>
+<div>
+<label class="font-label-caps text-label-caps mb-xs block text-on-surface-variant">Route Code</label>
+<select class="w-full bg-surface-container-lowest border border-outline-variant rounded-md px-md py-sm text-body-md focus:ring-2 focus:ring-primary-container outline-none transition-shadow">
+<option>R-104 (Suburban A)</option>
+<option>R-205 (Suburban B)</option>
+<option>R-309 (Core City)</option>
+</select>
+</div>
+<div>
+<label class="font-label-caps text-label-caps mb-xs block text-on-surface-variant">Visit Date</label>
+<div class="relative">
+<input class="w-full bg-surface-container-lowest border border-outline-variant rounded-md px-md py-sm text-body-md focus:ring-2 focus:ring-primary-container outline-none appearance-none" type="date"/>
+</div>
+</div>
+<div>
+<label class="font-label-caps text-label-caps mb-xs block text-on-surface-variant">Which visit counts as last?</label>
+<select class="w-full bg-surface-container-lowest border border-outline-variant rounded-md px-md py-sm text-body-md focus:ring-2 focus:ring-primary-container outline-none transition-shadow">
+<option>Latest Timestamp</option>
+<option>Largest Transaction</option>
+<option>Confirmed Delivered</option>
+</select>
+</div>
+</div>
+</section>
+<!-- Secondary Sidebar Actions -->
+<div class="pt-lg border-t border-outline-variant">
+<button class="w-full bg-secondary text-on-secondary font-semibold py-md rounded-lg hover:bg-on-surface-variant transition-all flex items-center justify-center gap-sm">
+<span class="material-symbols-outlined text-[20px]">refresh</span>
+                        Reset Filters
+                    </button>
+</div>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 overflow-y-auto custom-scrollbar bg-surface-bright flex flex-col">
+<!-- Content Header -->
+<header class="bg-primary-container text-on-primary p-lg flex justify-between items-center shrink-0">
+<div>
+<h1 class="font-headline-md text-headline-md">Daily Route Sales Report</h1>
+<p class="font-body-sm text-on-primary-container">Review and generate documentation for Route R-104</p>
+</div>
+<div class="flex gap-md">
+<button class="bg-surface-container-lowest text-primary font-semibold px-md py-sm rounded-lg flex items-center gap-sm hover:bg-surface-variant transition-colors">
+<span class="material-symbols-outlined text-[18px]">table_view</span>
+                        Download Excel
+                    </button>
+<button class="bg-primary text-white font-semibold px-md py-sm rounded-lg flex items-center gap-sm hover:opacity-90 transition-opacity">
+<span class="material-symbols-outlined text-[18px]">picture_as_pdf</span>
+                        Download PDF
+                    </button>
+</div>
+</header>
+<div class="p-lg space-y-lg">
+<!-- Stats Row -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-lg">
+<div class="bg-surface-container-lowest p-lg rounded-lg border border-outline-variant shadow-sm">
+<p class="font-label-caps text-label-caps text-on-surface-variant mb-xs">Total Sale Value</p>
+<p class="font-headline-lg text-headline-lg text-primary">$12,482.50</p>
+<div class="mt-sm flex items-center gap-xs text-green-700 font-body-sm">
+<span class="material-symbols-outlined text-[16px]">trending_up</span>
+<span>+4.2% vs yesterday</span>
+</div>
+</div>
+<div class="bg-surface-container-lowest p-lg rounded-lg border border-outline-variant shadow-sm">
+<p class="font-label-caps text-label-caps text-on-surface-variant mb-xs">Outlets Count</p>
+<p class="font-headline-lg text-headline-lg text-on-surface">24/28</p>
+<div class="mt-sm flex items-center gap-xs text-on-surface-variant font-body-sm">
+<span class="material-symbols-outlined text-[16px]">store</span>
+<span>85% Route completion</span>
+</div>
+</div>
+<div class="bg-surface-container-lowest p-lg rounded-lg border border-outline-variant shadow-sm">
+<p class="font-label-caps text-label-caps text-on-surface-variant mb-xs">Rows Matched</p>
+<p class="font-headline-lg text-headline-lg text-on-surface">156</p>
+<div class="mt-sm flex items-center gap-xs text-secondary font-body-sm">
+<span class="material-symbols-outlined text-[16px]">check_circle</span>
+<span>All templates validated</span>
+</div>
+</div>
+</div>
+<!-- Empty State (Hidden by default, shown when no data) -->
+<div class="hidden flex-1 flex flex-col items-center justify-center py-20 bg-surface-container-low rounded-lg border-2 border-dashed border-outline-variant" id="empty-state">
+<div class="w-16 h-16 rounded-full bg-surface-container-highest flex items-center justify-center mb-md">
+<span class="material-symbols-outlined text-[32px] text-on-surface-variant">upload_file</span>
+</div>
+<h2 class="font-headline-sm text-headline-sm text-on-surface-variant">No Report Data Loaded</h2>
+<p class="font-body-md text-on-surface-variant mt-xs">Upload a report in the sidebar to see detailed data.</p>
+</div>
+<!-- Data Table Section -->
+<div class="bg-surface-container-lowest rounded-lg border border-outline-variant shadow-sm overflow-hidden flex flex-col" id="data-section">
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead class="sticky-table-header bg-surface-variant">
+<tr>
+<th class="px-lg py-md font-label-caps text-label-caps text-primary border-b border-outline-variant uppercase">NO</th>
+<th class="px-lg py-md font-label-caps text-label-caps text-primary border-b border-outline-variant uppercase">Outlet Name</th>
+<th class="px-lg py-md font-label-caps text-label-caps text-primary border-b border-outline-variant uppercase">Product Name</th>
+<th class="px-lg py-md font-label-caps text-label-caps text-primary border-b border-outline-variant uppercase text-right">Quantity</th>
+</tr>
+</thead>
+<tbody class="text-body-md divide-y divide-outline-variant">
+<!-- Outlet Group 1 -->
+<tr class="bg-surface-container-low/30">
+<td class="px-lg py-sm font-table-numeric align-top">01</td>
+<td class="px-lg py-sm font-bold align-top" rowspan="3">
+<div class="flex flex-col">
+<span>Green Valley Grocers</span>
+<span class="font-normal text-body-sm text-on-surface-variant">ID: GV-9982</span>
+</div>
+</td>
+<td class="px-lg py-sm">Premium Roasted Coffee (250g)</td>
+<td class="px-lg py-sm font-table-numeric text-right">12</td>
+</tr>
+<tr>
+<td class="px-lg py-sm font-table-numeric"></td>
+<td class="px-lg py-sm">Organic Oolong Tea (10pk)</td>
+<td class="px-lg py-sm font-table-numeric text-right">5</td>
+</tr>
+<tr class="border-b-2 border-outline-variant">
+<td class="px-lg py-sm font-table-numeric"></td>
+<td class="px-lg py-sm">Natural Spring Water (1L x 12)</td>
+<td class="px-lg py-sm font-table-numeric text-right">24</td>
+</tr>
+<!-- Outlet Group 2 -->
+<tr class="bg-surface-container-low/30">
+<td class="px-lg py-sm font-table-numeric align-top">02</td>
+<td class="px-lg py-sm font-bold align-top" rowspan="2">
+<div class="flex flex-col">
+<span>The Corner Deli</span>
+<span class="font-normal text-body-sm text-on-surface-variant">ID: CD-4410</span>
+</div>
+</td>
+<td class="px-lg py-sm">Artisan Bread Flour (2kg)</td>
+<td class="px-lg py-sm font-table-numeric text-right">40</td>
+</tr>
+<tr>
+<td class="px-lg py-sm font-table-numeric"></td>
+<td class="px-lg py-sm">Sea Salt Crystals (500g)</td>
+<td class="px-lg py-sm font-table-numeric text-right">15</td>
+</tr>
+<!-- Outlet Group 3 -->
+<tr class="bg-surface-container-low/30">
+<td class="px-lg py-sm font-table-numeric align-top">03</td>
+<td class="px-lg py-sm font-bold align-top" rowspan="1">
+<div class="flex flex-col">
+<span>Metro Express Mart</span>
+<span class="font-normal text-body-sm text-on-surface-variant">ID: ME-1022</span>
+</div>
+</td>
+<td class="px-lg py-sm">Energy Boost Bar (Box 24)</td>
+<td class="px-lg py-sm font-table-numeric text-right">10</td>
+</tr>
+<!-- More data... -->
+<tr class="bg-surface-container-low/30">
+<td class="px-lg py-sm font-table-numeric align-top">04</td>
+<td class="px-lg py-sm font-bold align-top" rowspan="2">
+<div class="flex flex-col">
+<span>Sunrise Bakery</span>
+<span class="font-normal text-body-sm text-on-surface-variant">ID: SB-8831</span>
+</div>
+</td>
+<td class="px-lg py-sm">Unsalted Butter (500g)</td>
+<td class="px-lg py-sm font-table-numeric text-right">120</td>
+</tr>
+<tr>
+<td class="px-lg py-sm font-table-numeric"></td>
+<td class="px-lg py-sm">Pastry Flour Special (25kg)</td>
+<td class="px-lg py-sm font-table-numeric text-right">5</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Pagination Footer -->
+<footer class="bg-surface-container-low p-md flex items-center justify-between border-t border-outline-variant">
+<p class="font-body-sm text-on-surface-variant">Showing 1-4 of 24 outlets</p>
+<div class="flex gap-sm">
+<button class="p-xs rounded-md border border-outline-variant bg-surface hover:bg-surface-variant disabled:opacity-50" disabled="">
+<span class="material-symbols-outlined text-[20px]">chevron_left</span>
+</button>
+<button class="p-xs rounded-md border border-outline-variant bg-surface hover:bg-surface-variant">
+<span class="material-symbols-outlined text-[20px]">chevron_right</span>
+</button>
+</div>
+</footer>
+</div>
+</div>
+</main>
+</div>
+<!-- Micro-interactions scripts -->
+<script>
+        // Simple mock for empty state toggle (not strictly requested but good for showing capability)
+        function toggleEmptyState(isEmpty) {
+            const emptyState = document.getElementById('empty-state');
+            const dataSection = document.getElementById('data-section');
+            if (isEmpty) {
+                emptyState.classList.remove('hidden');
+                dataSection.classList.add('hidden');
+            } else {
+                emptyState.classList.add('hidden');
+                dataSection.classList.remove('hidden');
+            }
+        }
+        
+        // Example event listener for a button
+        document.querySelector('.material-symbols-outlined[data-icon="refresh"]')?.parentElement.addEventListener('click', () => {
+            console.log('Filters reset');
+        });
+    </script>
+</body></html>

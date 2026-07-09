@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { Upload, FileSpreadsheet, Settings2, LayoutDashboard, Download, FileDown, ChevronRight, CircleAlert, CircleCheck, RotateCcw } from "lucide-react";
 
 const DEFAULT_TEMPLATE = {
@@ -225,21 +226,19 @@ export default function App() {
   const fileInputRef = useRef(null);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await window.storage.get("template-config", false);
-        if (res && res.value) setTemplate({ ...DEFAULT_TEMPLATE, ...JSON.parse(res.value) });
-      } catch (e) {
-        // no saved config yet
-      } finally {
-        setTemplateLoaded(true);
-      }
-    })();
+    try {
+      const saved = localStorage.getItem("template-config");
+      if (saved) setTemplate({ ...DEFAULT_TEMPLATE, ...JSON.parse(saved) });
+    } catch (e) {
+      // no saved config yet
+    } finally {
+      setTemplateLoaded(true);
+    }
   }, []);
 
   useEffect(() => {
     if (!templateLoaded) return;
-    window.storage.set("template-config", JSON.stringify(template), false).catch(() => {});
+    try { localStorage.setItem("template-config", JSON.stringify(template)); } catch (e) {}
   }, [template, templateLoaded]);
 
   const territories = useMemo(() => {
@@ -281,51 +280,82 @@ export default function App() {
     reader.readAsArrayBuffer(file);
   }
 
-  function exportExcel() {
+  async function exportExcel() {
     if (!report) return;
-    const wb = XLSX.utils.book_new();
-    const ws = {};
-    const merges = [];
-    const set = (addr, v, z) => { ws[addr] = { v, t: typeof v === "number" ? "n" : "s" }; if (z) ws[addr].z = z; };
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Report");
+    ws.columns = [{ width: 6 }, { width: 30 }, { width: 44 }, { width: 12 }];
 
-    set("A1", template.reportTitle);
-    merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: 3 } });
-    set("A2", template.territoryLabel); set("B2", territory);
-    set("A3", template.routeLabel); set("B3", routeName);
-    set("A4", template.totalLabel); set("B4", Math.round(report.totalSale * 100) / 100);
-    set("A5", template.dateLabel); set("B5", lastVisitDate || "");
+    const accentARGB = "FF" + template.accent.replace("#", "").toUpperCase();
+    const thin = { style: "thin", color: { argb: "FFCBBFAE" } };
+    const borderAll = { top: thin, left: thin, bottom: thin, right: thin };
 
-    let r = 6; // row 7 (0-indexed 6) -> headers
-    set(`A${r + 1}`, template.colNo);
-    set(`B${r + 1}`, template.colOutlet);
-    set(`C${r + 1}`, template.colProduct);
-    set(`D${r + 1}`, template.colQty);
-    r += 1;
+    ws.mergeCells("A1:D1");
+    const titleCell = ws.getCell("A1");
+    titleCell.value = template.reportTitle;
+    titleCell.font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
+    titleCell.alignment = { horizontal: "center", vertical: "middle" };
+    titleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: accentARGB } };
+    ws.getRow(1).height = 26;
 
-    report.outlets.forEach((outlet, idx) => {
-      const startRow = r + 1; // 1-indexed excel row where this outlet begins
-      outlet.items.forEach((item, i) => {
-        const excelRow = r + 1 + i;
-        if (i === 0) set(`A${excelRow}`, idx + 1);
-        if (i === 0) set(`B${excelRow}`, outlet.name);
-        set(`C${excelRow}`, item.product);
-        set(`D${excelRow}`, item.qty);
-      });
-      const endRow = r + outlet.items.length;
-      if (outlet.items.length > 1) {
-        merges.push({ s: { r: startRow - 1, c: 0 }, e: { r: endRow - 1, c: 0 } });
-        merges.push({ s: { r: startRow - 1, c: 1 }, e: { r: endRow - 1, c: 1 } });
-      }
-      r = endRow;
+    const metaRows = [
+      [template.territoryLabel, territory],
+      [template.routeLabel, routeName],
+      [template.totalLabel, Math.round(report.totalSale * 100) / 100],
+      [template.dateLabel, lastVisitDate || ""],
+    ];
+    metaRows.forEach(([label, value], i) => {
+      const rowNum = i + 2;
+      const labelCell = ws.getCell(`A${rowNum}`);
+      labelCell.value = label;
+      labelCell.font = { bold: true };
+      ws.mergeCells(`B${rowNum}:D${rowNum}`);
+      ws.getCell(`B${rowNum}`).value = value;
     });
 
-    ws["!ref"] = `A1:D${r}`;
-    ws["!merges"] = merges;
-    ws["!cols"] = [{ wch: 6 }, { wch: 28 }, { wch: 42 }, { wch: 10 }];
-    XLSX.utils.book_append_sheet(wb, ws, "Report");
+    const headerRowNum = 7;
+    const headers = [template.colNo, template.colOutlet, template.colProduct, template.colQty];
+    headers.forEach((h, i) => {
+      const cell = ws.getCell(headerRowNum, i + 1);
+      cell.value = h;
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: accentARGB } };
+      cell.alignment = { vertical: "middle", horizontal: i === 3 ? "right" : "left" };
+      cell.border = borderAll;
+    });
 
+    let r = headerRowNum;
+    report.outlets.forEach((outlet, idx) => {
+      const startRow = r + 1;
+      outlet.items.forEach((item, i) => {
+        r += 1;
+        const row = ws.getRow(r);
+        row.getCell(1).value = i === 0 ? idx + 1 : null;
+        row.getCell(2).value = i === 0 ? outlet.name : null;
+        row.getCell(3).value = item.product;
+        row.getCell(4).value = item.qty;
+        [1, 2, 3, 4].forEach((c) => { row.getCell(c).border = borderAll; });
+        row.getCell(4).alignment = { horizontal: "right" };
+        row.getCell(3).alignment = { vertical: "middle" };
+      });
+      const endRow = r;
+      if (outlet.items.length > 1) {
+        ws.mergeCells(startRow, 1, endRow, 1);
+        ws.mergeCells(startRow, 2, endRow, 2);
+      }
+      ws.getCell(startRow, 1).alignment = { vertical: "middle", horizontal: "center" };
+      ws.getCell(startRow, 2).alignment = { vertical: "middle" };
+    });
+
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
     const safeRoute = (routeName || territory).replace(/[^a-z0-9]+/gi, "_").slice(0, 40);
-    XLSX.writeFile(wb, `${territory}_${safeRoute}_LastVisit.xlsx`);
+    a.href = url;
+    a.download = `${territory}_${safeRoute}_LastVisit.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   function exportPdf() {

@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Template Editor - Route Sales Report Builder</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700&amp;family=Work+Sans:wght@400;500&amp;family=IBM+Plex+Sans:wght@600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "primary-fixed-dim": "#ffb3b4",
+                    "error-container": "#ffdad6",
+                    "tertiary": "#35312a",
+                    "on-tertiary-container": "#bcb5ab",
+                    "outline-variant": "#dac1c0",
+                    "on-primary-container": "#ff999c",
+                    "inverse-primary": "#ffb3b4",
+                    "on-secondary": "#ffffff",
+                    "surface-container-highest": "#e5e2dd",
+                    "surface-dim": "#dcdad5",
+                    "on-surface": "#1c1c19",
+                    "tertiary-fixed": "#eae1d7",
+                    "on-secondary-fixed-variant": "#494642",
+                    "on-primary-fixed": "#3f020b",
+                    "on-background": "#1c1c19",
+                    "primary-container": "#7a2e33",
+                    "on-tertiary": "#ffffff",
+                    "on-primary": "#ffffff",
+                    "surface-bright": "#fcf9f4",
+                    "background": "#fcf9f4",
+                    "error": "#ba1a1a",
+                    "on-primary-fixed-variant": "#792d33",
+                    "surface": "#fcf9f4",
+                    "outline": "#877272",
+                    "secondary-container": "#e5dfd9",
+                    "on-error-container": "#93000a",
+                    "surface-variant": "#e5e2dd",
+                    "on-tertiary-fixed": "#1f1b15",
+                    "on-error": "#ffffff",
+                    "secondary-fixed": "#e7e1dc",
+                    "primary": "#5d181e",
+                    "tertiary-container": "#4c473f",
+                    "secondary-fixed-dim": "#cbc6c0",
+                    "on-surface-variant": "#544242",
+                    "secondary": "#615e59",
+                    "inverse-on-surface": "#f3f0eb",
+                    "on-tertiary-fixed-variant": "#4b463f",
+                    "primary-fixed": "#ffdad9",
+                    "inverse-surface": "#31302d",
+                    "surface-container-lowest": "#ffffff",
+                    "surface-tint": "#974449",
+                    "surface-container": "#f0ede9",
+                    "surface-container-high": "#ebe8e3",
+                    "surface-container-low": "#f6f3ee",
+                    "on-secondary-fixed": "#1d1b18",
+                    "tertiary-fixed-dim": "#cdc5bc",
+                    "on-secondary-container": "#66625e"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "container-margin": "40px",
+                    "lg": "24px",
+                    "md": "16px",
+                    "gutter": "20px",
+                    "xl": "32px",
+                    "base": "4px",
+                    "xs": "4px",
+                    "sm": "8px"
+            },
+            "fontFamily": {
+                    "body-md": ["Work Sans"],
+                    "body-sm": ["Work Sans"],
+                    "body-lg": ["Work Sans"],
+                    "table-numeric": ["Work Sans"],
+                    "headline-lg": ["Manrope"],
+                    "headline-md": ["Manrope"],
+                    "headline-sm": ["Manrope"],
+                    "label-caps": ["IBM Plex Sans"]
+            },
+            "fontSize": {
+                    "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                    "body-sm": ["12px", {"lineHeight": "16px", "fontWeight": "400"}],
+                    "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                    "table-numeric": ["14px", {"lineHeight": "20px", "fontWeight": "500"}],
+                    "headline-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                    "headline-md": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                    "headline-sm": ["18px", {"lineHeight": "24px", "fontWeight": "600"}],
+                    "label-caps": ["11px", {"lineHeight": "16px", "letterSpacing": "0.1em", "fontWeight": "600"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #fcf9f4; }
+        ::-webkit-scrollbar-thumb { background: #d9d1c7; border-radius: 10px; }
+        .swatch-ring { outline: 2px solid #5d181e; outline-offset: 2px; }
+    </style>
+</head>
+<body class="bg-background text-on-surface font-body-md min-h-screen">
+<!-- TopNavBar -->
+<header class="bg-surface border-b border-outline-variant shadow-sm docked full-width top-0 z-50">
+<div class="flex justify-between items-center w-full px-lg h-16 max-w-[1280px] mx-auto">
+<div class="flex items-center gap-md">
+<img alt="Route Sales Report Builder" class="h-8 w-auto object-contain" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA_DUnJpT3Sc23WkgPXHAYQ6Rbx1qtaDIt0UvxLN9_09guwsuqyvrDkc0s6L1hcBwH3Hj6flYZCy7FBFDAJlXb0yDP00SdZhBb66JJXmso3d2MDKpA20MjzMrkMSumfEldMbcE2deXmU9mIoBcr6Wg8Dub6453qqucqZTLpzH-4UljsEskiCSMh_4nhFpOV7ZvKf5apQA2q1BVj7yKeiPfLxDQKroA1QUUCe2sB83tSB1CNggbfZ07uFS-V4G9ZbzD3XOP15qckKX1a"/>
+<h1 class="font-headline-sm text-headline-sm font-bold text-primary">Route Sales Report Builder</h1>
+</div>
+<div class="bg-surface-container-low rounded-full p-1 flex items-center shadow-inner">
+<button class="px-md py-1.5 rounded-full text-on-surface-variant font-medium hover:text-primary transition-colors duration-200 cursor-pointer active:opacity-80 font-label-caps text-label-caps">Dashboard</button>
+<button class="px-md py-1.5 rounded-full bg-primary-container text-on-primary-container border-b-2 border-primary pb-1 font-bold font-label-caps text-label-caps">Template Editor</button>
+</div>
+<div class="flex items-center gap-md">
+<button class="material-symbols-outlined text-primary cursor-pointer active:opacity-80">download</button>
+<button class="material-symbols-outlined text-primary cursor-pointer active:opacity-80">picture_as_pdf</button>
+<div class="w-8 h-8 rounded-full bg-surface-container-highest overflow-hidden border border-outline-variant">
+<img class="object-cover w-full h-full" data-alt="A professional headshot of a corporate analyst in a light-mode business setting. The person is wearing a sharp, charcoal-colored blazer. The background is a clean, minimal office interior with warm wooden tones and soft lighting, maintaining the premium cherry alloy and off-white aesthetic of the brand." src="https://lh3.googleusercontent.com/aida-public/AB6AXuB9Cbt9Ix-eevBwpVz3z4WOtNyt6eJVxAoJVClajs4i77p9Avqjj5GwHrgLk1kGzBAbYLyDzp05EXm0c74AnPFSInHYdozJjogBufLhdV399Yy1cyp0rDN7zdLCBplteK8eELMWizE6CUGCKhoMbKqKSVZkvbkTnS5h31yre1MHdonMfDrdXpeVQUlKFE23KX1_pWOqGDZ8WiTKIN6A-jmSqeZONiIxSjYIOB7NU9HjLDB8guI4zbYVwanjViZ_9OFeu9rBr-tIF_ec"/>
+</div>
+</div>
+</div>
+</header>
+<main class="max-w-[1280px] mx-auto px-lg py-xl grid grid-cols-1 lg:grid-cols-12 gap-gutter">
+<!-- Left Column: Form Controls -->
+<section class="lg:col-span-5 flex flex-col gap-lg">
+<div class="bg-surface-container-lowest rounded-lg border border-outline-variant p-lg shadow-[0px_4px_12px_rgba(74,71,67,0.05)]">
+<div class="border-b border-outline-variant pb-md mb-lg">
+<h2 class="font-headline-sm text-headline-sm text-primary">Report Configuration</h2>
+<p class="text-body-sm text-on-surface-variant">Customize your template's layout and metadata labels.</p>
+</div>
+<div class="space-y-lg">
+<!-- General Labels -->
+<div class="grid grid-cols-1 gap-md">
+<div class="flex flex-col gap-xs">
+<label class="font-label-caps text-label-caps text-on-surface-variant">REPORT TITLE</label>
+<input class="bg-surface border border-outline-variant rounded-md px-md py-2 focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all" type="text" value="Daily Sales Dispatch"/>
+</div>
+<div class="grid grid-cols-2 gap-md">
+<div class="flex flex-col gap-xs">
+<label class="font-label-caps text-label-caps text-on-surface-variant">TERRITORY LABEL</label>
+<input class="bg-surface border border-outline-variant rounded-md px-md py-2 focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all" type="text" value="Zone"/>
+</div>
+<div class="flex flex-col gap-xs">
+<label class="font-label-caps text-label-caps text-on-surface-variant">ROUTE LABEL</label>
+<input class="bg-surface border border-outline-variant rounded-md px-md py-2 focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all" type="text" value="Route ID"/>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-md">
+<div class="flex flex-col gap-xs">
+<label class="font-label-caps text-label-caps text-on-surface-variant">TOTAL SALE LABEL</label>
+<input class="bg-surface border border-outline-variant rounded-md px-md py-2 focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all" type="text" value="Gross Revenue"/>
+</div>
+<div class="flex flex-col gap-xs">
+<label class="font-label-caps text-label-caps text-on-surface-variant">LAST VISIT LABEL</label>
+<input class="bg-surface border border-outline-variant rounded-md px-md py-2 focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all" type="text" value="Last Serviced"/>
+</div>
+</div>
+</div>
+<!-- Table Header Configuration -->
+<div class="pt-md">
+<label class="font-label-caps text-label-caps text-on-surface-variant mb-sm block">TABLE COLUMN HEADERS</label>
+<div class="grid grid-cols-2 gap-md">
+<input class="bg-surface border border-outline-variant rounded-md px-md py-2 focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all" type="text" value="Product Name"/>
+<input class="bg-surface border border-outline-variant rounded-md px-md py-2 focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all" type="text" value="SKU Number"/>
+<input class="bg-surface border border-outline-variant rounded-md px-md py-2 focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all" type="text" value="Quantity"/>
+<input class="bg-surface border border-outline-variant rounded-md px-md py-2 focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all" type="text" value="Unit Price"/>
+</div>
+</div>
+<!-- Visual Accents -->
+<div class="pt-md border-t border-outline-variant mt-lg">
+<label class="font-label-caps text-label-caps text-on-surface-variant mb-sm block">BRAND ACCENT COLOR</label>
+<div class="flex items-center gap-md">
+<div class="w-8 h-8 rounded-full cursor-pointer swatch-ring bg-[#7A2E33]" title="Cherry Alloy"></div>
+<div class="w-8 h-8 rounded-full cursor-pointer bg-[#4A4743]" title="Stone Charcoal"></div>
+<div class="w-8 h-8 rounded-full cursor-pointer bg-[#2E4A7A]" title="Deep Navy"></div>
+<div class="w-8 h-8 rounded-full cursor-pointer bg-[#2E7A4E]" title="Industrial Forest"></div>
+<div class="w-8 h-8 rounded-full cursor-pointer bg-[#7A5E2E]" title="Legacy Bronze"></div>
+</div>
+</div>
+<!-- Actions -->
+<div class="pt-lg flex items-center justify-between">
+<a class="flex items-center gap-xs text-on-surface-variant hover:text-primary transition-colors font-body-sm" href="#">
+<span class="material-symbols-outlined text-[18px]">restart_alt</span>
+                            Reset to defaults
+                        </a>
+<button class="bg-primary text-on-primary px-xl py-md rounded-lg font-bold hover:opacity-90 active:scale-[0.98] transition-all shadow-md">
+                            Save Template
+                        </button>
+</div>
+</div>
+</div>
+</section>
+<!-- Right Column: Live Preview -->
+<section class="lg:col-span-7">
+<div class="sticky top-lg">
+<label class="font-label-caps text-label-caps text-on-surface-variant mb-md block">LIVE PREVIEW (REAL-TIME)</label>
+<div class="bg-white rounded-lg border border-[#D9D1C7] shadow-[0px_12px_24px_rgba(74,71,67,0.12)] overflow-hidden min-h-[600px] flex flex-col">
+<!-- Preview Header -->
+<div class="bg-primary-container p-lg text-on-primary">
+<div class="flex justify-between items-start">
+<div>
+<h3 class="font-headline-md text-headline-md uppercase tracking-wide">Daily Sales Dispatch</h3>
+<p class="font-body-sm opacity-80">System-generated summary for active routes</p>
+</div>
+<div class="text-right">
+<p class="font-label-caps text-label-caps opacity-70">DATE</p>
+<p class="font-body-md font-bold">OCT 24, 2023</p>
+</div>
+</div>
+</div>
+<!-- Preview Content -->
+<div class="p-lg flex-1">
+<!-- Metadata Grid -->
+<div class="grid grid-cols-2 gap-lg border-b border-outline-variant pb-lg mb-lg">
+<div class="space-y-md">
+<div>
+<p class="font-label-caps text-[10px] text-on-surface-variant">ZONE</p>
+<p class="font-body-lg font-semibold">Northwest Sector (B-12)</p>
+</div>
+<div>
+<p class="font-label-caps text-[10px] text-on-surface-variant">ROUTE ID</p>
+<p class="font-body-lg font-semibold">RT-4099-X</p>
+</div>
+</div>
+<div class="space-y-md">
+<div>
+<p class="font-label-caps text-[10px] text-on-surface-variant">GROSS REVENUE</p>
+<p class="font-headline-sm text-primary font-bold">$12,450.00</p>
+</div>
+<div>
+<p class="font-label-caps text-[10px] text-on-surface-variant">LAST SERVICED</p>
+<p class="font-body-md">Oct 21, 2023 14:30 PM</p>
+</div>
+</div>
+</div>
+<!-- Data Table Preview -->
+<div class="space-y-sm">
+<h4 class="font-label-caps text-label-caps text-on-surface-variant">PRODUCT DATA SUMMARY</h4>
+<table class="w-full border-collapse">
+<thead>
+<tr class="bg-surface-container text-left border-t-2 border-primary">
+<th class="p-md font-label-caps text-[10px]">PRODUCT NAME</th>
+<th class="p-md font-label-caps text-[10px]">SKU NUMBER</th>
+<th class="p-md font-label-caps text-[10px] text-center">QUANTITY</th>
+<th class="p-md font-label-caps text-[10px] text-right">UNIT PRICE</th>
+</tr>
+</thead>
+<tbody class="font-table-numeric text-body-md">
+<tr class="border-b border-outline-variant">
+<td class="p-md">Cherry Alloy Finisher</td>
+<td class="p-md text-on-surface-variant">CA-88-900</td>
+<td class="p-md text-center">24</td>
+<td class="p-md text-right">$125.00</td>
+</tr>
+<tr class="border-b border-outline-variant">
+<td class="p-md">Stone Glaze Compound</td>
+<td class="p-md text-on-surface-variant">SG-12-102</td>
+<td class="p-md text-center">150</td>
+<td class="p-md text-right">$14.50</td>
+</tr>
+<tr class="border-b border-outline-variant">
+<td class="p-md">Industrial Sealant Pro</td>
+<td class="p-md text-on-surface-variant">IS-X1-44</td>
+<td class="p-md text-center">60</td>
+<td class="p-md text-right">$89.00</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Footer Sign-off -->
+<div class="mt-xl pt-lg border-t border-dashed border-outline-variant flex justify-between">
+<div class="w-32 h-12 border-b border-on-surface-variant/30 flex items-end">
+<span class="font-label-caps text-[9px] text-on-surface-variant mb-1">SUPERVISOR SIGNATURE</span>
+</div>
+<div class="w-32 h-12 border-b border-on-surface-variant/30 flex items-end">
+<span class="font-label-caps text-[9px] text-on-surface-variant mb-1">DATE ACKNOWLEDGED</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+</main>
+<script>
+        // Simple micro-interaction for color swatches
+        document.querySelectorAll('.swatch-ring').forEach(swatch => {
+            swatch.parentElement.addEventListener('click', (e) => {
+                if (e.target.classList.contains('w-8')) {
+                    document.querySelectorAll('.w-8.rounded-full').forEach(s => s.classList.remove('swatch-ring'));
+                    e.target.classList.add('swatch-ring');
+                }
+            });
+        });
+
+        // Real-time text update simulation for the main Title
+        const titleInput = document.querySelector('input[value="Daily Sales Dispatch"]');
+        const previewTitle = document.querySelector('h3.font-headline-md');
+        titleInput.addEventListener('input', (e) => {
+            previewTitle.textContent = e.target.value;
+        });
+    </script>
+</body></html>
