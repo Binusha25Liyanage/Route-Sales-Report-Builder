@@ -183,6 +183,122 @@ function Select({ value, onChange, children }) {
   );
 }
 
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const WEEKDAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
+
+function toISODate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function formatDisplayDate(iso) {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  return dt.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+function DatePicker({ value, onChange, accent }) {
+  const [open, setOpen] = useState(false);
+  const [viewDate, setViewDate] = useState(() => {
+    if (value) {
+      const [y, m] = value.split("-").map(Number);
+      return new Date(y, m - 1, 1);
+    }
+    return new Date();
+  });
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    function handleClick(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const year = viewDate.getFullYear();
+  const month = viewDate.getMonth();
+  const firstWeekday = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells = [];
+  for (let i = 0; i < firstWeekday; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  const today = new Date();
+  const todayISO = toISODate(today);
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between rounded-md px-3 py-2 text-sm text-left outline-none"
+        style={{ background: T.surface, border: `1px solid ${T.border}`, color: value ? T.text : T.textMuted, fontFamily: T.bodyFont }}
+      >
+        <span>{value ? formatDisplayDate(value) : "Select a date"}</span>
+        <Icon name="calendar_month" size={17} style={{ color: accent }} />
+      </button>
+
+      {open && (
+        <div
+          className="absolute z-20 mt-2 rounded-lg p-3"
+          style={{ background: T.surface, border: `1px solid ${T.border}`, boxShadow: "0px 8px 20px rgba(74,71,67,0.15)", width: 268 }}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <button type="button" onClick={() => setViewDate(new Date(year, month - 1, 1))} className="w-7 h-7 rounded-md flex items-center justify-center" style={{ color: T.textMuted }}>
+              <Icon name="chevron_left" size={18} />
+            </button>
+            <span style={{ fontFamily: T.headFont, fontWeight: 700, fontSize: 13, color: T.text }}>{MONTH_NAMES[month]} {year}</span>
+            <button type="button" onClick={() => setViewDate(new Date(year, month + 1, 1))} className="w-7 h-7 rounded-md flex items-center justify-center" style={{ color: T.textMuted }}>
+              <Icon name="chevron_right" size={18} />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-7 gap-y-1 mb-1">
+            {WEEKDAY_LETTERS.map((w, i) => (
+              <div key={i} className="text-center" style={{ fontFamily: T.capsFont, fontSize: 10, color: T.textMuted }}>{w}</div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-7 gap-y-1">
+            {cells.map((d, i) => {
+              if (d === null) return <div key={i} />;
+              const iso = toISODate(new Date(year, month, d));
+              const isSelected = iso === value;
+              const isToday = iso === todayISO;
+              return (
+                <button
+                  type="button"
+                  key={i}
+                  onClick={() => { onChange(iso); setOpen(false); }}
+                  className="w-8 h-8 rounded-full text-sm mx-auto flex items-center justify-center transition-colors"
+                  style={{
+                    background: isSelected ? accent : "transparent",
+                    color: isSelected ? "#fff" : T.text,
+                    fontWeight: isSelected || isToday ? 700 : 400,
+                    border: isToday && !isSelected ? `1px solid ${accent}` : "none",
+                    fontFamily: T.bodyFont,
+                  }}
+                >
+                  {d}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex justify-between mt-3 pt-2" style={{ borderTop: `1px solid ${T.border}` }}>
+            <button type="button" onClick={() => { onChange(""); setOpen(false); }} className="text-xs" style={{ color: T.textMuted, fontFamily: T.bodyFont }}>Clear</button>
+            <button type="button" onClick={() => { const iso = toISODate(today); onChange(iso); setViewDate(today); setOpen(false); }} className="text-xs font-semibold" style={{ color: accent, fontFamily: T.bodyFont }}>Today</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TemplateEditor({ template, setTemplate, onReset, previewData }) {
   const [saved, setSaved] = useState(false);
   const field = (key) => ({ value: template[key], onChange: (v) => setTemplate({ ...template, [key]: v }), accent: template.accent });
@@ -626,7 +742,7 @@ export default function App() {
                     </div>
                     <div>
                       <span className="block text-xs mb-1" style={{ color: T.textMuted }}>Last visit date</span>
-                      <input type="date" className="w-full rounded-md px-2.5 py-2 text-sm outline-none" style={{ background: T.surface, border: `1px solid ${T.border}` }} value={lastVisitDate} onChange={(e) => setLastVisitDate(e.target.value)} />
+                      <DatePicker value={lastVisitDate} onChange={setLastVisitDate} accent={template.accent} />
                     </div>
                     <div>
                       <span className="block text-xs mb-1" style={{ color: T.textMuted }}>Which visit counts as "last"?</span>
