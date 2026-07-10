@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, Fragment } from "react";
 import * as XLSX from "xlsx";
 import ExcelJS from "exceljs";
 
@@ -49,6 +49,117 @@ const VISIT_BLOCKS = [
 ];
 const OFF = { qty: 0, invoice: 1, retQty: 2, retVal: 3, freeQty: 4, freeVal: 5, net: 6 };
 const PAGE_SIZE = 4;
+
+const ATTENDANCE_WEEK_SIZE = 7;
+
+const ATTENDANCE_DEFAULT_TEMPLATE = {
+  reportTitle: "Employee Daily Attendance",
+  idLabel: "Employee ID",
+  nameLabel: "First Name",
+  deptLabel: "Department",
+  checkInLabel: "Check in",
+  checkOutLabel: "Check out",
+  accent: "#7A2E33",
+  bandingEnabled: true,
+  bandingColor: "#F3E3E1",
+};
+
+function parseAttendanceWorkbook(workbook) {
+  let headerInfo = null;
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    const arr = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true });
+    for (let i = 0; i < arr.length; i++) {
+      const r = arr[i] || [];
+      const norm = r.map((c) => String(c || "").trim().toLowerCase());
+      if (norm.includes("employee id") && norm.includes("date") && norm.includes("time")) {
+        headerInfo = { arr, headerRow: i, cols: {
+          empId: norm.indexOf("employee id"),
+          name: norm.indexOf("first name"),
+          dept: norm.indexOf("department"),
+          date: norm.indexOf("date"),
+          time: norm.indexOf("time"),
+        } };
+        break;
+      }
+    }
+    if (headerInfo) break;
+  }
+  if (!headerInfo) throw new Error("Couldn't find a sheet with Employee ID / Date / Time columns. Is this an attendance transaction export?");
+
+  const { arr, headerRow, cols } = headerInfo;
+  const employees = new Map();
+  const byEmpDate = new Map();
+  const dateSet = new Set();
+
+  for (let i = headerRow + 1; i < arr.length; i++) {
+    const r = arr[i] || [];
+    const empId = r[cols.empId];
+    const date = r[cols.date];
+    const time = r[cols.time];
+    if (empId === null || empId === undefined || empId === "" || !date || !time) continue;
+
+    const empIdStr = String(empId).trim();
+    const dateStr = String(date).trim();
+    const timeStr = String(time).trim();
+
+    if (!employees.has(empIdStr)) {
+      employees.set(empIdStr, { empId: empIdStr, name: String(r[cols.name] || "").trim(), dept: String(r[cols.dept] || "").trim() });
+    }
+    dateSet.add(dateStr);
+
+    const key = `${empIdStr}|${dateStr}`;
+    if (!byEmpDate.has(key)) byEmpDate.set(key, []);
+    byEmpDate.get(key).push(timeStr);
+  }
+
+  if (employees.size === 0) throw new Error("No attendance transaction rows were found.");
+
+  byEmpDate.forEach((times) => times.sort());
+
+  const dates = [...dateSet].sort();
+  const employeeList = [...employees.values()].sort((a, b) => Number(a.empId) - Number(b.empId) || a.empId.localeCompare(b.empId));
+
+  const weeks = [];
+  for (let i = 0; i < dates.length; i += ATTENDANCE_WEEK_SIZE) {
+    weeks.push(dates.slice(i, i + ATTENDANCE_WEEK_SIZE));
+  }
+
+  return { employees: employeeList, byEmpDate, dates, weeks };
+}
+
+function formatAttDate(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+function weekRangeLabel(weekDates) {
+  if (!weekDates.length) return "";
+  const first = formatAttDate(weekDates[0]);
+  const last = formatAttDate(weekDates[weekDates.length - 1]);
+  return weekDates.length > 1 ? `${first} – ${last}` : first;
+}
+
+function buildAttendanceRows(parsed, weekDates) {
+  return parsed.employees.map((emp) => ({
+    ...emp,
+    cells: weekDates.map((d) => {
+      const times = parsed.byEmpDate.get(`${emp.empId}|${d}`) || [];
+      if (times.length === 0) return { checkIn: "", checkOut: "" };
+      if (times.length === 1) return { checkIn: times[0], checkOut: "" };
+      return { checkIn: times[0], checkOut: times[times.length - 1] };
+    }),
+  }));
+}
+
+function escapeAttHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
 function num(v) {
   const n = typeof v === "number" ? v : parseFloat(v);
@@ -311,48 +422,93 @@ function DatePicker({ value, onChange, accent }) {
   );
 }
 
-function TemplateEditor({ template, setTemplate, onReset, previewData }) {
+function TemplateEditor({ template, setTemplate, onReset, previewData, attTemplate, setAttTemplate, onResetAtt, templateMode, setTemplateMode }) {
   const [saved, setSaved] = useState(false);
-  const field = (key) => ({ value: template[key], onChange: (v) => setTemplate({ ...template, [key]: v }), accent: template.accent });
+  const isAtt = templateMode === "attendance";
+  const current = isAtt ? attTemplate : template;
+  const setCurrent = isAtt ? setAttTemplate : setTemplate;
+  const field = (key) => ({ value: current[key], onChange: (v) => setCurrent({ ...current, [key]: v }), accent: current.accent });
 
   function handleSave() {
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
   }
 
+  const sampleWeekLabel1 = "01 Jul";
+  const sampleWeekLabel2 = "02 Jul";
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
       <section className="lg:col-span-5 flex flex-col gap-5">
+        <div className="rounded-lg p-1 flex items-center gap-1 w-fit" style={{ background: T.surfaceLow, border: `1px solid ${T.border}` }}>
+          <button
+            onClick={() => setTemplateMode("sales")}
+            className="px-4 py-1.5 rounded-md text-xs font-semibold transition-colors"
+            style={{ fontFamily: T.capsFont, letterSpacing: "0.06em", background: !isAtt ? template.accent : "transparent", color: !isAtt ? "#fff" : T.textMuted }}
+          >
+            SALES REPORT
+          </button>
+          <button
+            onClick={() => setTemplateMode("attendance")}
+            className="px-4 py-1.5 rounded-md text-xs font-semibold transition-colors"
+            style={{ fontFamily: T.capsFont, letterSpacing: "0.06em", background: isAtt ? attTemplate.accent : "transparent", color: isAtt ? "#fff" : T.textMuted }}
+          >
+            ATTENDANCE
+          </button>
+        </div>
+
         <div className="rounded-lg p-6" style={{ background: T.surface, border: `1px solid ${T.border}`, boxShadow: "0px 4px 12px rgba(74,71,67,0.05)" }}>
           <div className="pb-4 mb-6" style={{ borderBottom: `1px solid ${T.border}` }}>
-            <h2 style={{ fontFamily: T.headFont, fontSize: 18, fontWeight: 700, color: template.accent }}>Report Configuration</h2>
+            <h2 style={{ fontFamily: T.headFont, fontSize: 18, fontWeight: 700, color: current.accent }}>Report Configuration</h2>
             <p className="text-sm mt-1" style={{ color: T.textMuted, fontFamily: T.bodyFont }}>Customize your template's layout and metadata labels.</p>
           </div>
 
-          <div className="space-y-5">
-            <div>
-              <Label>Report title</Label>
-              <TextField {...field("reportTitle")} />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div><Label>Territory label</Label><TextField {...field("territoryLabel")} /></div>
-              <div><Label>Route label</Label><TextField {...field("routeLabel")} /></div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div><Label>Total sale label</Label><TextField {...field("totalLabel")} /></div>
-              <div><Label>Last visit label</Label><TextField {...field("dateLabel")} /></div>
-            </div>
-          </div>
+          {!isAtt ? (
+            <>
+              <div className="space-y-5">
+                <div>
+                  <Label>Report title</Label>
+                  <TextField {...field("reportTitle")} />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div><Label>Territory label</Label><TextField {...field("territoryLabel")} /></div>
+                  <div><Label>Route label</Label><TextField {...field("routeLabel")} /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div><Label>Total sale label</Label><TextField {...field("totalLabel")} /></div>
+                  <div><Label>Last visit label</Label><TextField {...field("dateLabel")} /></div>
+                </div>
+              </div>
 
-          <div className="pt-5">
-            <Label>Table column headers</Label>
-            <div className="grid grid-cols-2 gap-4">
-              <TextField {...field("colNo")} />
-              <TextField {...field("colOutlet")} />
-              <TextField {...field("colProduct")} />
-              <TextField {...field("colQty")} />
-            </div>
-          </div>
+              <div className="pt-5">
+                <Label>Table column headers</Label>
+                <div className="grid grid-cols-2 gap-4">
+                  <TextField {...field("colNo")} />
+                  <TextField {...field("colOutlet")} />
+                  <TextField {...field("colProduct")} />
+                  <TextField {...field("colQty")} />
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="space-y-5">
+                <div>
+                  <Label>Report title</Label>
+                  <TextField {...field("reportTitle")} />
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div><Label>Employee ID label</Label><TextField {...field("idLabel")} /></div>
+                  <div><Label>Name label</Label><TextField {...field("nameLabel")} /></div>
+                  <div><Label>Department label</Label><TextField {...field("deptLabel")} /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div><Label>Check-in label</Label><TextField {...field("checkInLabel")} /></div>
+                  <div><Label>Check-out label</Label><TextField {...field("checkOutLabel")} /></div>
+                </div>
+              </div>
+            </>
+          )}
 
           <div className="pt-5 mt-5" style={{ borderTop: `1px solid ${T.border}` }}>
             <Label>Brand accent color</Label>
@@ -360,13 +516,13 @@ function TemplateEditor({ template, setTemplate, onReset, previewData }) {
               {ACCENTS.map((a) => (
                 <button
                   key={a.value}
-                  onClick={() => setTemplate({ ...template, accent: a.value })}
+                  onClick={() => setCurrent({ ...current, accent: a.value })}
                   title={a.name}
                   className="w-8 h-8 rounded-full cursor-pointer transition-transform hover:scale-110"
                   style={{
                     backgroundColor: a.value,
                     border: `1px solid ${T.border}`,
-                    outline: template.accent === a.value ? `2px solid ${T.text}` : "none",
+                    outline: current.accent === a.value ? `2px solid ${T.text}` : "none",
                     outlineOffset: "2px",
                   }}
                 />
@@ -376,33 +532,35 @@ function TemplateEditor({ template, setTemplate, onReset, previewData }) {
 
           <div className="pt-5 mt-5" style={{ borderTop: `1px solid ${T.border}` }}>
             <div className="flex items-center justify-between mb-2">
-              <Label>Outlet row banding</Label>
+              <Label>{isAtt ? "Employee row banding" : "Outlet row banding"}</Label>
               <button
                 type="button"
-                onClick={() => setTemplate({ ...template, bandingEnabled: !template.bandingEnabled })}
+                onClick={() => setCurrent({ ...current, bandingEnabled: !current.bandingEnabled })}
                 className="relative w-10 h-5.5 rounded-full transition-colors shrink-0"
-                style={{ background: template.bandingEnabled ? template.accent : T.border, height: 22, width: 40 }}
-                title={template.bandingEnabled ? "Banding on" : "Banding off"}
+                style={{ background: current.bandingEnabled ? current.accent : T.border, height: 22, width: 40 }}
+                title={current.bandingEnabled ? "Banding on" : "Banding off"}
               >
                 <span
                   className="absolute top-0.5 rounded-full bg-white transition-transform"
-                  style={{ width: 18, height: 18, left: 2, transform: template.bandingEnabled ? "translateX(18px)" : "translateX(0)" }}
+                  style={{ width: 18, height: 18, left: 2, transform: current.bandingEnabled ? "translateX(18px)" : "translateX(0)" }}
                 />
               </button>
             </div>
-            <p className="text-xs mb-3" style={{ color: T.textMuted }}>Shades every other outlet's rows so its products are easier to scan. Applies to the table, the Excel export, and the PDF export.</p>
-            {template.bandingEnabled && (
+            <p className="text-xs mb-3" style={{ color: T.textMuted }}>
+              {isAtt ? "Shades every other employee's row so it's easier to scan across the week. Applies to the table, the Excel export, and the PDF export." : "Shades every other outlet's rows so its products are easier to scan. Applies to the table, the Excel export, and the PDF export."}
+            </p>
+            {current.bandingEnabled && (
               <div className="flex items-center gap-3 flex-wrap">
                 {BANDING_COLORS.map((c) => (
                   <button
                     key={c.value}
-                    onClick={() => setTemplate({ ...template, bandingColor: c.value })}
+                    onClick={() => setCurrent({ ...current, bandingColor: c.value })}
                     title={c.name}
                     className="w-8 h-8 rounded-full cursor-pointer transition-transform hover:scale-110"
                     style={{
                       backgroundColor: c.value,
                       border: `1px solid ${T.border}`,
-                      outline: template.bandingColor === c.value ? `2px solid ${T.text}` : "none",
+                      outline: current.bandingColor === c.value ? `2px solid ${T.text}` : "none",
                       outlineOffset: "2px",
                     }}
                   />
@@ -412,13 +570,13 @@ function TemplateEditor({ template, setTemplate, onReset, previewData }) {
           </div>
 
           <div className="pt-6 flex items-center justify-between">
-            <button onClick={onReset} className="flex items-center gap-1.5 text-sm transition-colors" style={{ color: T.textMuted, fontFamily: T.bodyFont }}>
+            <button onClick={isAtt ? onResetAtt : onReset} className="flex items-center gap-1.5 text-sm transition-colors" style={{ color: T.textMuted, fontFamily: T.bodyFont }}>
               <Icon name="restart_alt" size={18} /> Reset to defaults
             </button>
             <button
               onClick={handleSave}
               className="px-6 py-2.5 rounded-lg font-bold text-sm transition-all active:scale-[0.98]"
-              style={{ background: template.accent, color: "#fff", fontFamily: T.bodyFont, boxShadow: "0 2px 6px rgba(0,0,0,0.15)" }}
+              style={{ background: current.accent, color: "#fff", fontFamily: T.bodyFont, boxShadow: "0 2px 6px rgba(0,0,0,0.15)" }}
             >
               {saved ? "Saved ✓" : "Save Template"}
             </button>
@@ -429,83 +587,403 @@ function TemplateEditor({ template, setTemplate, onReset, previewData }) {
       <section className="lg:col-span-7">
         <div className="sticky top-5">
           <Label>Live preview (real-time)</Label>
-          <div className="rounded-lg overflow-hidden flex flex-col min-h-[560px]" style={{ background: T.surface, border: "1px solid #D9D1C7", boxShadow: "0px 12px 24px rgba(74,71,67,0.12)" }}>
-            <div className="p-6" style={{ background: template.accent, color: "#fff" }}>
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 style={{ fontFamily: T.headFont, fontSize: 22, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.02em" }}>{template.reportTitle}</h3>
-                  <p className="text-sm opacity-80 mt-1" style={{ fontFamily: T.bodyFont }}>Outlet-wise breakdown for the most recent visit</p>
+          {!isAtt ? (
+            <div className="rounded-lg overflow-hidden flex flex-col min-h-[560px]" style={{ background: T.surface, border: "1px solid #D9D1C7", boxShadow: "0px 12px 24px rgba(74,71,67,0.12)" }}>
+              <div className="p-6" style={{ background: template.accent, color: "#fff" }}>
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h3 style={{ fontFamily: T.headFont, fontSize: 22, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.02em" }}>{template.reportTitle}</h3>
+                    <p className="text-sm opacity-80 mt-1" style={{ fontFamily: T.bodyFont }}>Outlet-wise breakdown for the most recent visit</p>
+                  </div>
+                  <div className="text-right">
+                    <p style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.1em", opacity: 0.75 }}>{template.dateLabel.toUpperCase()}</p>
+                    <p className="font-bold" style={{ fontFamily: T.bodyFont }}>{previewData.lastVisitDate || "—"}</p>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <p style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.1em", opacity: 0.75 }}>{template.dateLabel.toUpperCase()}</p>
-                  <p className="font-bold" style={{ fontFamily: T.bodyFont }}>{previewData.lastVisitDate || "—"}</p>
+              </div>
+
+              <div className="p-6 flex-1">
+                <div className="grid grid-cols-2 gap-6 pb-6 mb-6" style={{ borderBottom: `1px solid ${T.border}` }}>
+                  <div className="space-y-4">
+                    <div>
+                      <p style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{template.territoryLabel.toUpperCase()}</p>
+                      <p className="font-semibold" style={{ fontFamily: T.bodyFont }}>{previewData.territory || "—"}</p>
+                    </div>
+                    <div>
+                      <p style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{template.routeLabel.toUpperCase()}</p>
+                      <p className="font-semibold" style={{ fontFamily: T.bodyFont }}>{previewData.routeName || "—"}</p>
+                    </div>
+                  </div>
+                  <div className="space-y-4">
+                    <div>
+                      <p style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{template.totalLabel.toUpperCase()}</p>
+                      <p className="font-bold" style={{ fontFamily: T.headFont, fontSize: 18, color: template.accent }}>{previewData.totalSale}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <h4 style={{ fontFamily: T.capsFont, fontSize: 11, letterSpacing: "0.1em", color: T.textMuted }}>OUTLET DATA SUMMARY</h4>
+                  <table className="w-full border-collapse text-sm" style={{ fontFamily: T.bodyFont }}>
+                    <thead>
+                      <tr style={{ background: T.surfaceContainer, borderTop: `2px solid ${template.accent}`, textAlign: "left" }}>
+                        <th className="p-2.5" style={{ fontFamily: T.capsFont, fontSize: 10 }}>{template.colNo}</th>
+                        <th className="p-2.5" style={{ fontFamily: T.capsFont, fontSize: 10 }}>{template.colOutlet}</th>
+                        <th className="p-2.5" style={{ fontFamily: T.capsFont, fontSize: 10 }}>{template.colProduct}</th>
+                        <th className="p-2.5 text-right" style={{ fontFamily: T.capsFont, fontSize: 10 }}>{template.colQty}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {previewData.sampleRows.map((row, i) => (
+                        <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
+                          <td className="p-2.5">{row.no}</td>
+                          <td className="p-2.5">{row.outlet}</td>
+                          <td className="p-2.5">{row.product}</td>
+                          <td className="p-2.5 text-right">{row.qty}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
-
-            <div className="p-6 flex-1">
-              <div className="grid grid-cols-2 gap-6 pb-6 mb-6" style={{ borderBottom: `1px solid ${T.border}` }}>
-                <div className="space-y-4">
-                  <div>
-                    <p style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{template.territoryLabel.toUpperCase()}</p>
-                    <p className="font-semibold" style={{ fontFamily: T.bodyFont }}>{previewData.territory || "—"}</p>
-                  </div>
-                  <div>
-                    <p style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{template.routeLabel.toUpperCase()}</p>
-                    <p className="font-semibold" style={{ fontFamily: T.bodyFont }}>{previewData.routeName || "—"}</p>
-                  </div>
-                </div>
-                <div className="space-y-4">
-                  <div>
-                    <p style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{template.totalLabel.toUpperCase()}</p>
-                    <p className="font-bold" style={{ fontFamily: T.headFont, fontSize: 18, color: template.accent }}>{previewData.totalSale}</p>
-                  </div>
-                </div>
+          ) : (
+            <div className="rounded-lg overflow-hidden flex flex-col min-h-[560px]" style={{ background: T.surface, border: "1px solid #D9D1C7", boxShadow: "0px 12px 24px rgba(74,71,67,0.12)" }}>
+              <div className="p-6" style={{ background: attTemplate.accent, color: "#fff" }}>
+                <h3 style={{ fontFamily: T.headFont, fontSize: 22, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.02em" }}>{attTemplate.reportTitle}</h3>
+                <p className="text-sm opacity-80 mt-1" style={{ fontFamily: T.bodyFont }}>Week 1 of 4 — {sampleWeekLabel1} – {sampleWeekLabel2}</p>
               </div>
 
-              <div className="space-y-2">
-                <h4 style={{ fontFamily: T.capsFont, fontSize: 11, letterSpacing: "0.1em", color: T.textMuted }}>OUTLET DATA SUMMARY</h4>
+              <div className="p-6 flex-1">
                 <table className="w-full border-collapse text-sm" style={{ fontFamily: T.bodyFont }}>
                   <thead>
-                    <tr style={{ background: T.surfaceContainer, borderTop: `2px solid ${template.accent}`, textAlign: "left" }}>
-                      <th className="p-2.5" style={{ fontFamily: T.capsFont, fontSize: 10 }}>{template.colNo}</th>
-                      <th className="p-2.5" style={{ fontFamily: T.capsFont, fontSize: 10 }}>{template.colOutlet}</th>
-                      <th className="p-2.5" style={{ fontFamily: T.capsFont, fontSize: 10 }}>{template.colProduct}</th>
-                      <th className="p-2.5 text-right" style={{ fontFamily: T.capsFont, fontSize: 10 }}>{template.colQty}</th>
+                    <tr style={{ background: T.surfaceContainer, borderTop: `2px solid ${attTemplate.accent}`, textAlign: "left" }}>
+                      <th className="p-2.5" style={{ fontFamily: T.capsFont, fontSize: 10 }}>{attTemplate.idLabel}</th>
+                      <th className="p-2.5" style={{ fontFamily: T.capsFont, fontSize: 10 }}>{attTemplate.nameLabel}</th>
+                      <th className="p-2.5" style={{ fontFamily: T.capsFont, fontSize: 10 }}>{attTemplate.deptLabel}</th>
+                      <th className="p-2.5 text-center" colSpan={2} style={{ fontFamily: T.capsFont, fontSize: 10 }}>{sampleWeekLabel1}</th>
+                    </tr>
+                    <tr style={{ background: T.surfaceContainer, textAlign: "left" }}>
+                      <th className="p-2.5"></th><th className="p-2.5"></th><th className="p-2.5"></th>
+                      <th className="p-2.5 text-center" style={{ fontFamily: T.capsFont, fontSize: 9, color: T.textMuted }}>{attTemplate.checkInLabel}</th>
+                      <th className="p-2.5 text-center" style={{ fontFamily: T.capsFont, fontSize: 9, color: T.textMuted }}>{attTemplate.checkOutLabel}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {previewData.sampleRows.map((row, i) => (
-                      <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
-                        <td className="p-2.5">{row.no}</td>
-                        <td className="p-2.5">{row.outlet}</td>
-                        <td className="p-2.5">{row.product}</td>
-                        <td className="p-2.5 text-right">{row.qty}</td>
-                      </tr>
-                    ))}
+                    <tr style={{ borderBottom: `1px solid ${T.border}` }}>
+                      <td className="p-2.5">1750</td>
+                      <td className="p-2.5 font-semibold">Binusha</td>
+                      <td className="p-2.5">ICT</td>
+                      <td className="p-2.5 text-center">08:02</td>
+                      <td className="p-2.5 text-center">17:15</td>
+                    </tr>
+                    <tr style={{ borderBottom: `1px solid ${T.border}`, background: attTemplate.bandingEnabled ? attTemplate.bandingColor : "transparent" }}>
+                      <td className="p-2.5">1751</td>
+                      <td className="p-2.5 font-semibold">Manohari</td>
+                      <td className="p-2.5">SA / Finance</td>
+                      <td className="p-2.5 text-center">07:58</td>
+                      <td className="p-2.5 text-center">17:02</td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
             </div>
-          </div>
-          <p className="text-xs mt-3" style={{ color: T.textMuted, fontFamily: T.bodyFont }}>Saved automatically, and used every time you generate a report on the Dashboard.</p>
+          )}
+          <p className="text-xs mt-3" style={{ color: T.textMuted, fontFamily: T.bodyFont }}>Saved automatically, and used every time you generate a report.</p>
         </div>
       </section>
     </div>
   );
 }
 
+function AttendanceScreen({
+  attTemplate,
+  attUploads,
+  attActiveId,
+  setAttActiveId,
+  activeAttUpload,
+  attWeekIndex,
+  setAttWeekIndex,
+  activeAttWeekDates,
+  activeAttRows,
+  attFileInputRef,
+  handleAttFiles,
+  removeAttUpload,
+  exportAttendanceExcelFor,
+  exportAttendancePdfFor,
+  exportAllAttendanceWeeksExcel,
+  exportAllAttendanceWeeksPdf,
+}) {
+  const weeks = activeAttUpload && activeAttUpload.parsed ? activeAttUpload.parsed.weeks : [];
+  const canExportActive = Boolean(activeAttUpload && activeAttUpload.parsed && activeAttRows.length > 0);
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+      <div className="lg:col-span-4 flex flex-col gap-5">
+        <div className="rounded-lg p-5" style={{ background: T.surface, border: `1px solid ${T.border}` }}>
+          <Label>Step 1: Upload attendance report(s)</Label>
+          <div
+            onClick={() => attFileInputRef.current?.click()}
+            onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files.length) handleAttFiles(e.dataTransfer.files); }}
+            onDragOver={(e) => e.preventDefault()}
+            className="rounded-lg p-6 text-center cursor-pointer transition-colors"
+            style={{ border: `2px dashed ${T.border}` }}
+          >
+            <Icon name="cloud_upload" size={30} style={{ color: T.textMuted }} />
+            <p className="text-sm font-semibold mt-2">Drop files here or click</p>
+            <p className="text-xs mt-1" style={{ color: T.textMuted }}>Employee attendance / punch-log export (.xlsx). Weeks are split automatically from whatever date range the file covers.</p>
+            <input ref={attFileInputRef} type="file" accept=".xlsx,.xls" multiple className="hidden" onChange={(e) => { if (e.target.files.length) handleAttFiles(e.target.files); e.target.value = ""; }} />
+          </div>
+          {attUploads.length > 0 && (
+            <p className="mt-3 text-sm flex items-center gap-1.5" style={{ color: "#2E7A4E" }}><Icon name="check_circle" size={16} />{attUploads.length} file{attUploads.length === 1 ? "" : "s"} uploaded</p>
+          )}
+        </div>
+
+        {attUploads.length > 0 && (
+          <div className="flex flex-col gap-4">
+            {attUploads.map((u) => {
+              const isActive = u.id === attActiveId;
+              return (
+                <div
+                  key={u.id}
+                  onClick={() => setAttActiveId(u.id)}
+                  className="rounded-lg p-4 cursor-pointer transition-colors"
+                  style={{ background: T.surface, border: `2px solid ${isActive ? attTemplate.accent : T.border}` }}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <Icon name="badge" size={16} style={{ color: isActive ? attTemplate.accent : T.textMuted, flexShrink: 0 }} />
+                      <span className="text-sm font-semibold truncate" title={u.fileName}>{u.fileName}</span>
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); removeAttUpload(u.id); }}
+                      className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center hover:bg-black/5"
+                      style={{ color: T.textMuted }}
+                      title="Remove"
+                    >
+                      <Icon name="close" size={15} />
+                    </button>
+                  </div>
+
+                  {u.parseError && (
+                    <p className="text-xs flex items-start gap-1.5" style={{ color: "#ba1a1a" }}><Icon name="error" size={14} />{u.parseError}</p>
+                  )}
+
+                  {u.parsed && (
+                    <p className="text-xs" style={{ color: T.textMuted }}>
+                      {u.parsed.employees.length} employees · {u.parsed.dates.length} days · {u.parsed.weeks.length} week sheet{u.parsed.weeks.length === 1 ? "" : "s"}
+                    </p>
+                  )}
+
+                  {isActive && u.parsed && u.parsed.weeks.length > 0 && (
+                    <div className="mt-3 pt-3 flex flex-wrap gap-1.5" style={{ borderTop: `1px solid ${T.border}` }} onClick={(e) => e.stopPropagation()}>
+                      {u.parsed.weeks.map((weekDates, i) => (
+                        <button
+                          key={i}
+                          onClick={() => setAttWeekIndex(i)}
+                          className="px-2.5 py-1 rounded-md text-xs font-semibold transition-colors"
+                          style={{
+                            background: attWeekIndex === i ? attTemplate.accent : T.surfaceContainer,
+                            color: attWeekIndex === i ? "#fff" : T.textMuted,
+                          }}
+                          title={weekRangeLabel(weekDates)}
+                        >
+                          Week {i + 1}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {activeAttUpload && activeAttUpload.parsed && activeAttUpload.parsed.weeks.length > 1 && (
+              <>
+                <button
+                  onClick={() => exportAllAttendanceWeeksExcel(activeAttUpload)}
+                  className="w-full py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
+                  style={{ background: attTemplate.accent, color: "#fff", fontFamily: T.bodyFont }}
+                  title="You'll be asked where to save each week's file, one after another"
+                >
+                  <Icon name="folder_zip" size={16} /> Export All Weeks as Excel ({activeAttUpload.parsed.weeks.length})
+                </button>
+                <button
+                  onClick={() => exportAllAttendanceWeeksPdf(activeAttUpload)}
+                  className="w-full py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
+                  style={{ background: T.surface, color: attTemplate.accent, border: `1.5px solid ${attTemplate.accent}`, fontFamily: T.bodyFont }}
+                  title="Opens a print tab for each week, one after another"
+                >
+                  <Icon name="picture_as_pdf" size={16} /> Export All Weeks as PDF ({activeAttUpload.parsed.weeks.length})
+                </button>
+                <p className="text-xs text-center -mt-2" style={{ color: T.textMuted }}>Excel prompts a save location per week. PDF opens a print tab per week — allow pop-ups if your browser blocks them.</p>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="lg:col-span-8">
+        {!activeAttUpload || !activeAttUpload.parsed ? (
+          <div className="h-full flex flex-col items-center justify-center text-sm py-24 rounded-lg" style={{ border: `2px dashed ${T.border}`, color: T.textMuted }}>
+            <Icon name="badge" size={28} style={{ color: T.textMuted }} />
+            <p className="mt-2">Upload an attendance report to see the weekly breakdown here</p>
+          </div>
+        ) : (
+          <div className="rounded-lg overflow-hidden" style={{ background: T.surface, border: `1px solid ${T.border}` }}>
+            <div className="p-6 flex items-center justify-between flex-wrap gap-3" style={{ background: attTemplate.accent }}>
+              <div>
+                <h2 style={{ fontFamily: T.headFont, fontSize: 22, fontWeight: 700, color: "#fff" }}>{attTemplate.reportTitle}</h2>
+                <p className="text-sm opacity-85 mt-1" style={{ color: "#fff" }}>Week {attWeekIndex + 1} of {weeks.length} — {weekRangeLabel(activeAttWeekDates)}</p>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => exportAttendanceExcelFor(activeAttUpload, activeAttWeekDates, attWeekIndex)} disabled={!canExportActive} className="flex items-center gap-1.5 disabled:opacity-40 text-xs font-bold px-3.5 py-2 rounded-lg" style={{ background: "#fff", color: attTemplate.accent }}>
+                  <Icon name="grid_on" size={15} /> Download Excel
+                </button>
+                <button onClick={() => exportAttendancePdfFor(activeAttUpload, activeAttWeekDates)} disabled={!canExportActive} className="flex items-center gap-1.5 disabled:opacity-40 text-xs font-bold px-3.5 py-2 rounded-lg" style={{ background: "rgba(0,0,0,0.2)", color: "#fff" }}>
+                  <Icon name="picture_as_pdf" size={15} /> Download PDF
+                </button>
+              </div>
+            </div>
+
+            <div className="p-5 grid grid-cols-3 gap-4" style={{ borderBottom: `1px solid ${T.border}` }}>
+              <div className="rounded-lg p-4" style={{ border: `1px solid ${T.border}` }}>
+                <p style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>EMPLOYEES</p>
+                <p style={{ fontFamily: T.headFont, fontSize: 22, fontWeight: 700, color: attTemplate.accent }} className="mt-1">{activeAttUpload.parsed.employees.length}</p>
+              </div>
+              <div className="rounded-lg p-4" style={{ border: `1px solid ${T.border}` }}>
+                <p style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>DAYS THIS WEEK</p>
+                <p style={{ fontFamily: T.headFont, fontSize: 22, fontWeight: 700 }} className="mt-1">{activeAttWeekDates.length}</p>
+              </div>
+              <div className="rounded-lg p-4" style={{ border: `1px solid ${T.border}` }}>
+                <p style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>TOTAL WEEKS</p>
+                <p style={{ fontFamily: T.headFont, fontSize: 22, fontWeight: 700 }} className="mt-1">{weeks.length}</p>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="text-sm" style={{ minWidth: 620 + activeAttWeekDates.length * 160 }}>
+                <thead>
+                  <tr>
+                    <th rowSpan={2} className="text-left px-4 py-2.5 align-bottom" style={{ background: T.surfaceContainer, borderTop: `2px solid ${attTemplate.accent}`, fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{attTemplate.idLabel}</th>
+                    <th rowSpan={2} className="text-left px-4 py-2.5 align-bottom" style={{ background: T.surfaceContainer, borderTop: `2px solid ${attTemplate.accent}`, fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{attTemplate.nameLabel}</th>
+                    <th rowSpan={2} className="text-left px-4 py-2.5 align-bottom" style={{ background: T.surfaceContainer, borderTop: `2px solid ${attTemplate.accent}`, fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{attTemplate.deptLabel}</th>
+                    {activeAttWeekDates.map((d) => (
+                      <th key={d} colSpan={2} className="text-center px-2 py-1.5" style={{ background: T.surfaceContainer, borderTop: `2px solid ${attTemplate.accent}`, borderLeft: `1px solid ${T.border}`, fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.06em", color: T.text }}>{formatAttDate(d)}</th>
+                    ))}
+                  </tr>
+                  <tr>
+                    {activeAttWeekDates.map((d) => (
+                      <Fragment key={d}>
+                        <th className="text-center px-2 py-1.5" style={{ background: T.surfaceContainer, borderLeft: `1px solid ${T.border}`, fontFamily: T.capsFont, fontSize: 9, letterSpacing: "0.06em", color: T.textMuted }}>{attTemplate.checkInLabel}</th>
+                        <th className="text-center px-2 py-1.5" style={{ background: T.surfaceContainer, fontFamily: T.capsFont, fontSize: 9, letterSpacing: "0.06em", color: T.textMuted }}>{attTemplate.checkOutLabel}</th>
+                      </Fragment>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeAttRows.map((emp, idx) => {
+                    const banded = attTemplate.bandingEnabled && idx % 2 === 1;
+                    return (
+                      <tr key={emp.empId} style={{ borderBottom: `1px solid ${T.border}`, background: banded ? attTemplate.bandingColor : "transparent" }}>
+                        <td className="px-4 py-2" style={{ color: T.textMuted }}>{emp.empId}</td>
+                        <td className="px-4 py-2 font-semibold">{emp.name}</td>
+                        <td className="px-4 py-2">{emp.dept}</td>
+                        {emp.cells.map((c, i) => (
+                          <Fragment key={i}>
+                            <td className="px-2 py-2 text-center tabular-nums" style={{ borderLeft: `1px solid ${T.border}` }}>{c.checkIn || "—"}</td>
+                            <td className="px-2 py-2 text-center tabular-nums">{c.checkOut || "—"}</td>
+                          </Fragment>
+                        ))}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [screen, setScreen] = useState("dashboard");
+  const [templateMode, setTemplateMode] = useState("sales");
   const [template, setTemplate] = useState(DEFAULT_TEMPLATE);
   const [templateLoaded, setTemplateLoaded] = useState(false);
+  const [attTemplate, setAttTemplate] = useState(ATTENDANCE_DEFAULT_TEMPLATE);
+  const [attTemplateLoaded, setAttTemplateLoaded] = useState(false);
 
   const [uploads, setUploads] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [page, setPage] = useState(0);
 
+  const [attUploads, setAttUploads] = useState([]);
+  const [attActiveId, setAttActiveId] = useState(null);
+  const [attWeekIndex, setAttWeekIndex] = useState(0);
+
   const fileInputRef = useRef(null);
   const uploadCounter = useRef(0);
+  const attFileInputRef = useRef(null);
+  const attUploadCounter = useRef(0);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("attendance-template-config");
+      if (saved) setAttTemplate({ ...ATTENDANCE_DEFAULT_TEMPLATE, ...JSON.parse(saved) });
+    } catch (e) {}
+    finally { setAttTemplateLoaded(true); }
+  }, []);
+
+  useEffect(() => {
+    if (!attTemplateLoaded) return;
+    try { localStorage.setItem("attendance-template-config", JSON.stringify(attTemplate)); } catch (e) {}
+  }, [attTemplate, attTemplateLoaded]);
+
+  const activeAttUpload = attUploads.find((u) => u.id === attActiveId) || null;
+  const activeAttWeekDates = activeAttUpload && activeAttUpload.parsed ? (activeAttUpload.parsed.weeks[attWeekIndex] || []) : [];
+  const activeAttRows = activeAttUpload && activeAttUpload.parsed ? buildAttendanceRows(activeAttUpload.parsed, activeAttWeekDates) : [];
+
+  useEffect(() => { setAttWeekIndex(0); }, [attActiveId]);
+
+  function updateAttUpload(id, patch) {
+    setAttUploads((prev) => prev.map((u) => (u.id === id ? { ...u, ...patch } : u)));
+  }
+
+  function removeAttUpload(id) {
+    setAttUploads((prev) => prev.filter((u) => u.id !== id));
+    if (attActiveId === id) {
+      setAttActiveId((prevActive) => {
+        const remaining = attUploads.filter((u) => u.id !== id);
+        return remaining.length ? remaining[0].id : null;
+      });
+    }
+  }
+
+  function handleAttFiles(fileList) {
+    const files = Array.from(fileList || []);
+    files.forEach((file) => {
+      attUploadCounter.current += 1;
+      const id = `att-upload-${Date.now()}-${attUploadCounter.current}`;
+      const draft = { id, fileName: file.name, parsed: null, parseError: null };
+      setAttUploads((prev) => [...prev, draft]);
+      setAttActiveId((prev) => prev || id);
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const wb = XLSX.read(e.target.result, { type: "array" });
+          const parsed = parseAttendanceWorkbook(wb);
+          updateAttUpload(id, { parsed, parseError: null });
+        } catch (err) {
+          updateAttUpload(id, { parsed: null, parseError: err.message || "Couldn't read this file." });
+        }
+      };
+      reader.onerror = () => updateAttUpload(id, { parsed: null, parseError: "The file could not be read." });
+      reader.readAsArrayBuffer(file);
+    });
+  }
 
   useEffect(() => {
     try {
@@ -595,7 +1073,32 @@ export default function App() {
     updateUpload(activeUpload.id, { territory: firstTerritory, routeName: firstRoute, lastVisitDate: "", strategy: "fallback" });
   }
 
-  async function exportExcelFor(upload, rep) {
+  async function saveBlob(blob, suggestedName, { pickLocation = true } = {}) {
+    if (pickLocation && window.showSaveFilePicker) {
+      try {
+        const handle = await window.showSaveFilePicker({
+          suggestedName,
+          types: [{ description: "Excel Workbook", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] } }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        return true;
+      } catch (err) {
+        if (err && err.name === "AbortError") return false; // user cancelled the picker
+        // any other error: fall through to the default-download fallback below
+      }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = suggestedName;
+    a.click();
+    URL.revokeObjectURL(url);
+    return true;
+  }
+
+  async function exportExcelFor(upload, rep, exportAllMode = false) {
     if (!rep) return;
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Report");
@@ -669,13 +1172,9 @@ export default function App() {
 
     const buf = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], { type: "application/octet-stream" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
     const safeRoute = (upload.routeName || upload.territory).replace(/[^a-z0-9]+/gi, "_").slice(0, 40);
-    a.href = url;
-    a.download = `${upload.territory}_${safeRoute}_LastVisit.xlsx`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const fileName = `${upload.territory}_${safeRoute}_LastVisit.xlsx`;
+    return saveBlob(blob, fileName, { pickLocation: exportAllMode !== true });
   }
 
   function exportPdfFor(upload, rep) {
@@ -729,8 +1228,122 @@ export default function App() {
       const rep = buildReport(upload.rows, upload.territory, upload.routeName, upload.strategy);
       if (rep.outlets.length === 0) continue;
       await exportExcelFor(upload, rep);
-      await new Promise((res) => setTimeout(res, 250));
     }
+  }
+
+  function exportAllPdf() {
+    for (const upload of uploads) {
+      if (!upload.rows || !upload.territory) continue;
+      const rep = buildReport(upload.rows, upload.territory, upload.routeName, upload.strategy);
+      if (rep.outlets.length === 0) continue;
+      exportPdfFor(upload, rep);
+    }
+  }
+
+  async function exportAttendanceExcelFor(upload, weekDates, weekIdx, pickLocation = true) {
+    const rowsData = buildAttendanceRows(upload.parsed, weekDates);
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Attendance");
+    ws.columns = [{ width: 12 }, { width: 18 }, { width: 16 }, ...weekDates.flatMap(() => [{ width: 11 }, { width: 11 }])];
+
+    const accentARGB = "FF" + attTemplate.accent.replace("#", "").toUpperCase();
+    const thin = { style: "thin", color: { argb: "FFCBBFAE" } };
+    const borderAll = { top: thin, left: thin, bottom: thin, right: thin };
+
+    ws.mergeCells(1, 1, 1, 3);
+    const titleCell = ws.getCell(1, 1);
+    titleCell.value = attTemplate.reportTitle;
+    titleCell.font = { bold: true, size: 13, color: { argb: "FFFFFFFF" } };
+    titleCell.alignment = { horizontal: "center", vertical: "middle" };
+    titleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: accentARGB } };
+    ws.getRow(1).height = 22;
+
+    weekDates.forEach((d, i) => {
+      const startCol = 4 + i * 2;
+      ws.mergeCells(1, startCol, 1, startCol + 1);
+      const cell = ws.getCell(1, startCol);
+      cell.value = formatAttDate(d);
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.alignment = { horizontal: "center", vertical: "middle" };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: accentARGB } };
+    });
+
+    const headerLabels = [attTemplate.idLabel, attTemplate.nameLabel, attTemplate.deptLabel, ...weekDates.flatMap(() => [attTemplate.checkInLabel, attTemplate.checkOutLabel])];
+    headerLabels.forEach((label, i) => {
+      const cell = ws.getCell(2, i + 1);
+      cell.value = label;
+      cell.font = { bold: true };
+      cell.border = borderAll;
+      cell.alignment = { horizontal: "center", vertical: "middle" };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF0EDE9" } };
+    });
+
+    const bandARGB = "FF" + attTemplate.bandingColor.replace("#", "").toUpperCase();
+    rowsData.forEach((emp, idx) => {
+      const rowNum = idx + 3;
+      const banded = attTemplate.bandingEnabled && idx % 2 === 1;
+      const values = [emp.empId, emp.name, emp.dept, ...emp.cells.flatMap((c) => [c.checkIn, c.checkOut])];
+      values.forEach((v, i) => {
+        const cell = ws.getCell(rowNum, i + 1);
+        cell.value = v;
+        cell.border = borderAll;
+        cell.alignment = { horizontal: i < 3 ? "left" : "center", vertical: "middle" };
+        if (banded) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bandARGB } };
+      });
+    });
+
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/octet-stream" });
+    const label = weekRangeLabel(weekDates).replace(/[^a-z0-9]+/gi, "_");
+    const fileName = `Attendance_Week${weekIdx + 1}_${label}.xlsx`;
+    return saveBlob(blob, fileName, { pickLocation });
+  }
+
+  function exportAttendancePdfFor(upload, weekDates) {
+    const rowsData = buildAttendanceRows(upload.parsed, weekDates);
+    const win = window.open("", "_blank");
+    const headCells = weekDates.map((d) => `<th colspan="2">${escapeAttHtml(formatAttDate(d))}</th>`).join("");
+    const subCells = weekDates.map(() => `<th>${escapeAttHtml(attTemplate.checkInLabel)}</th><th>${escapeAttHtml(attTemplate.checkOutLabel)}</th>`).join("");
+    const rowsHtml = rowsData.map((emp, idx) => {
+      const banded = attTemplate.bandingEnabled && idx % 2 === 1;
+      const bg = banded ? ` style="background:${attTemplate.bandingColor}"` : "";
+      const cells = emp.cells.map((c) => `<td>${escapeAttHtml(c.checkIn)}</td><td>${escapeAttHtml(c.checkOut)}</td>`).join("");
+      return `<tr${bg}><td>${escapeAttHtml(emp.empId)}</td><td>${escapeAttHtml(emp.name)}</td><td>${escapeAttHtml(emp.dept)}</td>${cells}</tr>`;
+    }).join("");
+
+    win.document.write(`
+      <html><head><title>${attTemplate.reportTitle}</title>
+      <style>
+        body{font-family:${T.bodyFont};color:${T.text};padding:24px;}
+        h1{font-family:${T.headFont};text-align:center;color:white;background:${attTemplate.accent};padding:12px;border-radius:6px;font-size:16px;margin-bottom:16px;}
+        table{width:100%;border-collapse:collapse;font-size:11px;}
+        th{background:${attTemplate.accent};color:#fff;padding:6px 4px;border:1px solid #ccc;}
+        td{padding:4px;border:1px solid #ddd;text-align:center;}
+        td:nth-child(2){text-align:left;} td:nth-child(3){text-align:left;}
+        @media print{ body{padding:0;} }
+      </style></head><body>
+      <h1>${attTemplate.reportTitle} — ${weekRangeLabel(weekDates)}</h1>
+      <table>
+        <thead>
+          <tr><th rowspan="2">${attTemplate.idLabel}</th><th rowspan="2">${attTemplate.nameLabel}</th><th rowspan="2">${attTemplate.deptLabel}</th>${headCells}</tr>
+          <tr>${subCells}</tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+      </body></html>`);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 350);
+  }
+
+  async function exportAllAttendanceWeeksExcel(upload) {
+    for (let i = 0; i < upload.parsed.weeks.length; i++) {
+      await exportAttendanceExcelFor(upload, upload.parsed.weeks[i], i);
+    }
+  }
+
+  function exportAllAttendanceWeeksPdf(upload) {
+    upload.parsed.weeks.forEach((weekDates) => exportAttendancePdfFor(upload, weekDates));
   }
 
   const previewData = report
@@ -753,7 +1366,7 @@ export default function App() {
       <header style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
         <div className="max-w-[1280px] mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src="/logo (1).png" alt="Lakmee" className="h-9 w-auto object-contain" />
+            <img src="/logo.png" alt="Lakmee" className="h-9 w-auto object-contain" />
             <h1 style={{ fontFamily: T.headFont, fontSize: 18, fontWeight: 700, color: template.accent }}>Route Sales Report Builder</h1>
           </div>
           <nav className="rounded-full p-1 flex items-center gap-1" style={{ background: T.surfaceLow, boxShadow: "inset 0 1px 2px rgba(0,0,0,0.04)" }}>
@@ -762,31 +1375,80 @@ export default function App() {
               className="px-4 py-1.5 rounded-full text-sm font-semibold transition-colors"
               style={{ fontFamily: T.capsFont, fontSize: 12, letterSpacing: "0.06em", background: screen === "dashboard" ? template.accent : "transparent", color: screen === "dashboard" ? "#fff" : T.textMuted }}
             >
-              DASHBOARD
+              SALES REPORT
+            </button>
+            <button
+              onClick={() => setScreen("attendance")}
+              className="px-4 py-1.5 rounded-full text-sm font-semibold transition-colors"
+              style={{ fontFamily: T.capsFont, fontSize: 12, letterSpacing: "0.06em", background: screen === "attendance" ? attTemplate.accent : "transparent", color: screen === "attendance" ? "#fff" : T.textMuted }}
+            >
+              ATTENDANCE
             </button>
             <button
               onClick={() => setScreen("template")}
               className="px-4 py-1.5 rounded-full text-sm font-semibold transition-colors"
-              style={{ fontFamily: T.capsFont, fontSize: 12, letterSpacing: "0.06em", background: screen === "template" ? template.accent : "transparent", color: screen === "template" ? "#fff" : T.textMuted }}
+              style={{ fontFamily: T.capsFont, fontSize: 12, letterSpacing: "0.06em", background: screen === "template" ? (templateMode === "attendance" ? attTemplate.accent : template.accent) : "transparent", color: screen === "template" ? "#fff" : T.textMuted }}
             >
               TEMPLATE EDITOR
             </button>
           </nav>
           <div className="flex items-center gap-4">
-            <button onClick={exportExcel} disabled={!canExport} title="Download Excel" style={{ color: template.accent, opacity: canExport ? 1 : 0.35, cursor: canExport ? "pointer" : "default" }}>
-              <Icon name="download" />
-            </button>
-            <button onClick={exportPdf} disabled={!canExport} title="Download PDF" style={{ color: template.accent, opacity: canExport ? 1 : 0.35, cursor: canExport ? "pointer" : "default" }}>
-              <Icon name="picture_as_pdf" />
-            </button>
-            <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ background: template.accent, border: `1px solid ${T.border}` }}>RT</div>
+            {screen === "attendance" ? (
+              <>
+                <button onClick={() => activeAttUpload && exportAttendanceExcelFor(activeAttUpload, activeAttWeekDates, attWeekIndex)} disabled={!activeAttUpload || !activeAttUpload.parsed} title="Download this week's Excel" style={{ color: attTemplate.accent, opacity: activeAttUpload && activeAttUpload.parsed ? 1 : 0.35, cursor: activeAttUpload && activeAttUpload.parsed ? "pointer" : "default" }}>
+                  <Icon name="download" />
+                </button>
+                <button onClick={() => activeAttUpload && exportAttendancePdfFor(activeAttUpload, activeAttWeekDates)} disabled={!activeAttUpload || !activeAttUpload.parsed} title="Download this week's PDF" style={{ color: attTemplate.accent, opacity: activeAttUpload && activeAttUpload.parsed ? 1 : 0.35, cursor: activeAttUpload && activeAttUpload.parsed ? "pointer" : "default" }}>
+                  <Icon name="picture_as_pdf" />
+                </button>
+              </>
+            ) : (
+              <>
+                <button onClick={exportExcel} disabled={!canExport} title="Download Excel" style={{ color: template.accent, opacity: canExport ? 1 : 0.35, cursor: canExport ? "pointer" : "default" }}>
+                  <Icon name="download" />
+                </button>
+                <button onClick={exportPdf} disabled={!canExport} title="Download PDF" style={{ color: template.accent, opacity: canExport ? 1 : 0.35, cursor: canExport ? "pointer" : "default" }}>
+                  <Icon name="picture_as_pdf" />
+                </button>
+              </>
+            )}
+            <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ background: screen === "attendance" ? attTemplate.accent : template.accent, border: `1px solid ${T.border}` }}>RT</div>
           </div>
         </div>
       </header>
 
       <main className="max-w-[1280px] mx-auto px-6 py-8">
         {screen === "template" ? (
-          <TemplateEditor template={template} setTemplate={setTemplate} onReset={() => setTemplate(DEFAULT_TEMPLATE)} previewData={previewData} />
+          <TemplateEditor
+            template={template}
+            setTemplate={setTemplate}
+            onReset={() => setTemplate(DEFAULT_TEMPLATE)}
+            previewData={previewData}
+            attTemplate={attTemplate}
+            setAttTemplate={setAttTemplate}
+            onResetAtt={() => setAttTemplate(ATTENDANCE_DEFAULT_TEMPLATE)}
+            templateMode={templateMode}
+            setTemplateMode={setTemplateMode}
+          />
+        ) : screen === "attendance" ? (
+          <AttendanceScreen
+            attTemplate={attTemplate}
+            attUploads={attUploads}
+            attActiveId={attActiveId}
+            setAttActiveId={setAttActiveId}
+            activeAttUpload={activeAttUpload}
+            attWeekIndex={attWeekIndex}
+            setAttWeekIndex={setAttWeekIndex}
+            activeAttWeekDates={activeAttWeekDates}
+            activeAttRows={activeAttRows}
+            attFileInputRef={attFileInputRef}
+            handleAttFiles={handleAttFiles}
+            removeAttUpload={removeAttUpload}
+            exportAttendanceExcelFor={exportAttendanceExcelFor}
+            exportAttendancePdfFor={exportAttendancePdfFor}
+            exportAllAttendanceWeeksExcel={exportAllAttendanceWeeksExcel}
+            exportAllAttendanceWeeksPdf={exportAllAttendanceWeeksPdf}
+          />
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
             <div className="lg:col-span-4 flex flex-col gap-5">
@@ -885,11 +1547,26 @@ export default function App() {
                     <button
                       onClick={exportAllExcel}
                       disabled={exportableCount === 0}
+                      title="You'll be asked where to save each file, one after another"
                       className="w-full py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-40"
                       style={{ background: template.accent, color: "#fff", fontFamily: T.bodyFont }}
                     >
                       <Icon name="folder_zip" size={16} /> Export All as Excel ({exportableCount})
                     </button>
+                  )}
+                  {uploads.length > 1 && (
+                    <button
+                      onClick={exportAllPdf}
+                      disabled={exportableCount === 0}
+                      title="Opens a print tab for each file, one after another"
+                      className="w-full py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-40"
+                      style={{ background: T.surface, color: template.accent, border: `1.5px solid ${template.accent}`, fontFamily: T.bodyFont }}
+                    >
+                      <Icon name="picture_as_pdf" size={16} /> Export All as PDF ({exportableCount})
+                    </button>
+                  )}
+                  {uploads.length > 1 && exportableCount > 0 && (
+                    <p className="text-xs text-center -mt-2" style={{ color: T.textMuted }}>Excel: you'll be prompted to choose a save location for each file. PDF: a print tab opens for each file at once — allow pop-ups for this site if your browser blocks them.</p>
                   )}
                 </div>
               )}
