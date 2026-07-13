@@ -2,16 +2,20 @@ import { useState, useEffect, useRef, useMemo, Fragment } from "react";
 import * as XLSX from "xlsx";
 import ExcelJS from "exceljs";
 
+const SALES_DEFAULT_COLUMNS = [
+  { id: "c1", label: "NO", field: "no" },
+  { id: "c2", label: "Outlet Name", field: "outlet" },
+  { id: "c3", label: "Product Name", field: "product" },
+  { id: "c4", label: "Quantity", field: "qty" },
+];
+
 const DEFAULT_TEMPLATE = {
   reportTitle: "Last Visit Outlet Wise Quantity Sales",
   territoryLabel: "Territory",
   routeLabel: "Route",
   totalLabel: "Total sale value",
   dateLabel: "Last visit date",
-  colNo: "NO",
-  colOutlet: "Outlet Name",
-  colProduct: "Product Name",
-  colQty: "Quantity",
+  columns: SALES_DEFAULT_COLUMNS,
   accent: "#7A2E33",
   bandingEnabled: true,
   bandingColor: "#F3E3E1",
@@ -52,17 +56,140 @@ const PAGE_SIZE = 4;
 
 const ATTENDANCE_WEEK_SIZE = 7;
 
+const ATTENDANCE_DEFAULT_COLUMNS = [
+  { id: "a1", label: "Employee ID", field: "empId" },
+  { id: "a2", label: "First Name", field: "name" },
+  { id: "a3", label: "Department", field: "dept" },
+];
+
 const ATTENDANCE_DEFAULT_TEMPLATE = {
   reportTitle: "Employee Daily Attendance",
-  idLabel: "Employee ID",
-  nameLabel: "First Name",
-  deptLabel: "Department",
+  columns: ATTENDANCE_DEFAULT_COLUMNS,
   checkInLabel: "Check in",
   checkOutLabel: "Check out",
   accent: "#7A2E33",
   bandingEnabled: true,
   bandingColor: "#F3E3E1",
 };
+
+// ---------- field options for the column-mapping dropdowns ----------
+const SALES_FIELD_OPTIONS = [
+  { value: "no", label: "Row number (auto)" },
+  { value: "outlet", label: "Outlet name (from data)" },
+  { value: "product", label: "Product name (from data)" },
+  { value: "qty", label: "Quantity (from data)" },
+  { value: "", label: "Custom / blank column" },
+];
+const SALES_MERGE_FIELDS = new Set(["no", "outlet"]);
+
+const ATTENDANCE_FIELD_OPTIONS = [
+  { value: "empId", label: "Employee ID (from data)" },
+  { value: "name", label: "Employee name (from data)" },
+  { value: "dept", label: "Department (from data)" },
+  { value: "", label: "Custom / blank column" },
+];
+
+const DAILY_TX_DEFAULT_COLUMNS = [
+  { id: "d1", label: "Employee ID", field: "empId" },
+  { id: "d2", label: "First Name", field: "name" },
+  { id: "d3", label: "Department", field: "dept" },
+];
+
+const DAILY_TX_DEFAULT_TEMPLATE = {
+  reportTitle: "Transaction",
+  columns: DAILY_TX_DEFAULT_COLUMNS,
+  timeLabel: "Time",
+  stateLabel: "Punch State",
+  absentPlaceholder: "-",
+  accent: "#7A2E33",
+  bandingEnabled: true,
+  bandingColor: "#F3E3E1",
+};
+
+const DAILY_TX_FIELD_OPTIONS = [
+  { value: "empId", label: "Employee ID (from data)" },
+  { value: "name", label: "Employee name (from data)" },
+  { value: "dept", label: "Department (from data)" },
+  { value: "", label: "Custom / blank column" },
+];
+
+function makeColumnId() {
+  return `col-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function normalizeHeaderText(v) {
+  return String(v || "").trim().toLowerCase();
+}
+
+function autoMapField(label, kind) {
+  const t = normalizeHeaderText(label);
+  if (kind === "sales") {
+    if (["no", "sl", "s.no", "sl no", "#", "serial", "serial no"].includes(t)) return "no";
+    if (t.includes("outlet") || t.includes("shop") || t.includes("customer")) return "outlet";
+    if (t.includes("product") || t.includes("item") || t.includes("description")) return "product";
+    if (t.includes("qty") || t.includes("quantity")) return "qty";
+    return "";
+  }
+  if (kind === "attendance") {
+    if (t.includes("employee id") || t.includes("emp id") || t === "id" || t.includes("employee no")) return "empId";
+    if (t.includes("name")) return "name";
+    if (t.includes("dept") || t.includes("department")) return "dept";
+    return "";
+  }
+  return "";
+}
+
+function parseImportedColumns(workbook, kind) {
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    const arr = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true });
+
+    if (kind === "sales") {
+      for (const row of arr) {
+        const cells = (row || []).map((c) => normalizeHeaderText(c));
+        const hasQty = cells.some((c) => c.includes("qty") || c.includes("quantity"));
+        const hasOutletOrProduct = cells.some((c) => c.includes("outlet") || c.includes("product") || c.includes("item"));
+        if (hasQty && hasOutletOrProduct) {
+          const detected = (row || []).filter((c) => c !== null && c !== undefined && String(c).trim() !== "");
+          if (detected.length >= 2) {
+            return detected.map((label) => ({ id: makeColumnId(), label: String(label).trim(), field: autoMapField(label, "sales") }));
+          }
+        }
+      }
+    } else if (kind === "attendance") {
+      for (const row of arr) {
+        const cells = (row || []).map((c) => normalizeHeaderText(c));
+        const checkInIdx = cells.findIndex((c) => c.includes("check in") || c.includes("check-in") || c === "checkin");
+        const hasEmployeeHints = cells.some((c) => c.includes("employee") || c.includes("department") || c.includes("first name"));
+        if (checkInIdx > 0 && hasEmployeeHints) {
+          const leading = (row || []).slice(0, checkInIdx).filter((c) => c !== null && c !== undefined && String(c).trim() !== "");
+          if (leading.length >= 1) {
+            return leading.map((label) => ({ id: makeColumnId(), label: String(label).trim(), field: autoMapField(label, "attendance") }));
+          }
+        }
+      }
+    } else if (kind === "dailytx") {
+      for (const row of arr) {
+        const cells = (row || []).map((c) => normalizeHeaderText(c));
+        const punchIdx = cells.findIndex((c) => c.includes("time"));
+        const hasEmployeeHints = cells.some((c) => c.includes("employee") || c.includes("department") || c.includes("first name"));
+        if (punchIdx > 0 && hasEmployeeHints) {
+          const leading = (row || []).slice(0, punchIdx).filter((c) => c !== null && c !== undefined && String(c).trim() !== "");
+          if (leading.length >= 1) {
+            return leading.map((label) => ({ id: makeColumnId(), label: String(label).trim(), field: autoMapField(label, "attendance") }));
+          }
+        }
+      }
+    }
+  }
+  throw new Error(
+    kind === "sales"
+      ? "Couldn't detect a header row with outlet/product and quantity columns in this file."
+      : kind === "dailytx"
+      ? "Couldn't detect a header row with Employee ID/Department columns followed by Time/Punch State in this file."
+      : "Couldn't detect a header row with Employee ID/Department columns followed by Check in/Check out in this file."
+  );
+}
 
 function parseAttendanceWorkbook(workbook) {
   let headerInfo = null;
@@ -133,6 +260,134 @@ function formatAttDate(iso) {
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 
+// ---------- Daily Transaction report ----------
+function normHeader(v) {
+  return String(v || "").trim().toLowerCase();
+}
+
+function parseDailyTransactionWorkbook(workbook) {
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    const arr = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true });
+
+    let headerRowIdx = -1;
+    let colMap = null;
+
+    for (let i = 0; i < arr.length; i++) {
+      const cells = (arr[i] || []).map(normHeader);
+      const hasEmpId = cells.some((c) => c.includes("employee id") || c === "emp id" || c === "id");
+      const hasPunch = cells.some((c) => c.includes("punch state") || c === "state");
+      if (hasEmpId && hasPunch) {
+        headerRowIdx = i;
+        colMap = {};
+        cells.forEach((c, ci) => {
+          if (c.includes("employee id") || c === "emp id") colMap.empId = ci;
+          else if (c === "id" && colMap.empId === undefined) colMap.empId = ci;
+          else if (c.includes("first name")) colMap.name = ci;
+          else if (c === "name" && colMap.name === undefined) colMap.name = ci;
+          else if (c.includes("department") || c === "dept") colMap.dept = ci;
+          else if (c === "date") colMap.date = ci;
+          else if (c === "time") colMap.time = ci;
+          else if (c.includes("punch state") || c === "state") colMap.state = ci;
+        });
+        break;
+      }
+    }
+    if (headerRowIdx === -1 || colMap.empId === undefined) continue;
+
+    let reportDate = null;
+    if (colMap.date === undefined) {
+      for (let i = 0; i < headerRowIdx; i++) {
+        const row = arr[i] || [];
+        for (const cell of row) {
+          const s = String(cell || "").trim();
+          const m = s.match(/^date\s*:?\s*(.+)$/i);
+          if (m && m[1] && m[1].trim()) { reportDate = m[1].trim(); break; }
+        }
+        if (reportDate) break;
+      }
+    }
+
+    const employees = new Map();
+    const punches = new Map();
+
+    for (let i = headerRowIdx + 1; i < arr.length; i++) {
+      const row = arr[i] || [];
+      if (row.every((c) => c === null || c === undefined || String(c).trim() === "")) continue;
+      const empId = String(row[colMap.empId] ?? "").trim();
+      if (!empId) continue;
+      const name = colMap.name !== undefined ? String(row[colMap.name] ?? "").trim() : "";
+      const dept = colMap.dept !== undefined ? String(row[colMap.dept] ?? "").trim() : "";
+      const time = colMap.time !== undefined ? String(row[colMap.time] ?? "").trim() : "";
+      const state = colMap.state !== undefined ? String(row[colMap.state] ?? "").trim() : "";
+      if (colMap.date !== undefined && !reportDate) {
+        const d = String(row[colMap.date] ?? "").trim();
+        if (d) reportDate = d;
+      }
+
+      if (!employees.has(empId)) employees.set(empId, { empId, name, dept });
+      else {
+        const existing = employees.get(empId);
+        if (!existing.name && name) existing.name = name;
+        if (!existing.dept && dept) existing.dept = dept;
+      }
+
+      if (time || state) {
+        if (!punches.has(empId)) punches.set(empId, []);
+        const list = punches.get(empId);
+        if (!list.some((p) => p.time === time && p.state === state)) list.push({ time, state });
+      }
+    }
+
+    if (employees.size === 0) continue;
+    punches.forEach((list) => list.sort((a, b) => a.time.localeCompare(b.time)));
+
+    return {
+      date: reportDate,
+      employees: [...employees.values()].sort((a, b) => Number(a.empId) - Number(b.empId) || a.empId.localeCompare(b.empId)),
+      punches,
+    };
+  }
+  throw new Error("Couldn't find a header row with Employee ID and Punch State columns in this file.");
+}
+
+function mergeRoster(existingRoster, newEmployees) {
+  const map = new Map(existingRoster.map((e) => [e.empId, e]));
+  newEmployees.forEach((e) => {
+    if (map.has(e.empId)) {
+      const cur = map.get(e.empId);
+      map.set(e.empId, { empId: e.empId, name: e.name || cur.name, dept: e.dept || cur.dept });
+    } else {
+      map.set(e.empId, e);
+    }
+  });
+  return [...map.values()].sort((a, b) => Number(a.empId) - Number(b.empId) || a.empId.localeCompare(b.empId));
+}
+
+function buildDailyTxRows(roster, parsed, absentPlaceholder) {
+  const source = roster && roster.length > 0 ? roster : parsed.employees;
+  const rows = [];
+  source.forEach((emp) => {
+    const recs = parsed.punches.get(emp.empId) || [];
+    const empInfo = parsed.employees.find((e) => e.empId === emp.empId) || emp;
+    if (recs.length === 0) {
+      rows.push({ empId: empInfo.empId, name: empInfo.name || emp.name, dept: empInfo.dept || emp.dept, time: absentPlaceholder, state: absentPlaceholder, absent: true, groupKey: emp.empId });
+    } else {
+      recs.forEach((r) => rows.push({ empId: empInfo.empId, name: empInfo.name || emp.name, dept: empInfo.dept || emp.dept, time: r.time, state: r.state, absent: false, groupKey: emp.empId }));
+    }
+  });
+  return rows;
+}
+
+function dtCellValue(field, emp) {
+  switch (field) {
+    case "empId": return emp.empId;
+    case "name": return emp.name;
+    case "dept": return emp.dept;
+    default: return "";
+  }
+}
+
 function weekRangeLabel(weekDates) {
   if (!weekDates.length) return "";
   const first = formatAttDate(weekDates[0]);
@@ -150,6 +405,15 @@ function buildAttendanceRows(parsed, weekDates) {
       return { checkIn: times[0], checkOut: times[times.length - 1] };
     }),
   }));
+}
+
+function attCellValue(field, emp) {
+  switch (field) {
+    case "empId": return emp.empId;
+    case "name": return emp.name;
+    case "dept": return emp.dept;
+    default: return "";
+  }
 }
 
 function escapeAttHtml(value) {
@@ -247,6 +511,29 @@ function buildReport(rows, territory, routeName, strategy) {
   return { outlets, totalSale, matchedRows, consideredRows: filtered.length };
 }
 
+function salesCellValue(field, { outletIdx, item, isFirst, outlet }) {
+  switch (field) {
+    case "no": return isFirst ? outletIdx + 1 : "";
+    case "outlet": return isFirst ? outlet.name : "";
+    case "product": return item.product;
+    case "qty": return item.qty;
+    default: return "";
+  }
+}
+
+function getTerritoryRouteCombos(rows) {
+  const seen = new Set();
+  const combos = [];
+  rows.forEach((r) => {
+    const key = `${r.territory}|||${r.routeName || ""}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      combos.push({ territory: r.territory, routeName: r.routeName || "" });
+    }
+  });
+  return combos;
+}
+
 // ---------- shared visual tokens ----------
 const T = {
   bg: "#FCF9F4",
@@ -305,6 +592,109 @@ function Select({ value, onChange, children }) {
     </select>
   );
 }
+
+function ColumnListEditor({ columns, setColumns, fieldOptions, accent, importKind, importLabel }) {
+  const fileRef = useRef(null);
+  const [importError, setImportError] = useState("");
+
+  function updateCol(id, patch) {
+    setColumns(columns.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  }
+  function removeCol(id) {
+    if (columns.length <= 1) return;
+    setColumns(columns.filter((c) => c.id !== id));
+  }
+  function addCol() {
+    setColumns([...columns, { id: makeColumnId(), label: "New Column", field: "" }]);
+  }
+  function move(id, dir) {
+    const idx = columns.findIndex((c) => c.id === id);
+    const swapIdx = idx + dir;
+    if (swapIdx < 0 || swapIdx >= columns.length) return;
+    const next = [...columns];
+    [next[idx], next[swapIdx]] = [next[swapIdx], next[idx]];
+    setColumns(next);
+  }
+
+  function handleImportFile(file) {
+    setImportError("");
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: "array" });
+        const detected = parseImportedColumns(wb, importKind);
+        setColumns(detected);
+      } catch (err) {
+        setImportError(err.message || "Couldn't read that file's column layout.");
+      }
+    };
+    reader.onerror = () => setImportError("The file could not be read.");
+    reader.readAsArrayBuffer(file);
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <Label>{importLabel || "Columns"}</Label>
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          className="flex items-center gap-1 text-xs font-semibold"
+          style={{ color: accent, fontFamily: T.bodyFont }}
+        >
+          <Icon name="upload_file" size={14} /> Import from format file
+        </button>
+        <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => { if (e.target.files[0]) handleImportFile(e.target.files[0]); e.target.value = ""; }} />
+      </div>
+      {importError && (
+        <p className="text-xs flex items-start gap-1.5 mb-2" style={{ color: "#ba1a1a" }}><Icon name="error" size={14} />{importError}</p>
+      )}
+
+      <div className="space-y-2">
+        {columns.map((c, i) => (
+          <div key={c.id} className="flex items-center gap-1.5">
+            <div className="flex flex-col">
+              <button type="button" onClick={() => move(c.id, -1)} disabled={i === 0} className="disabled:opacity-25" style={{ color: T.textMuted, lineHeight: 0.7 }}>
+                <Icon name="expand_less" size={16} />
+              </button>
+              <button type="button" onClick={() => move(c.id, 1)} disabled={i === columns.length - 1} className="disabled:opacity-25" style={{ color: T.textMuted, lineHeight: 0.7 }}>
+                <Icon name="expand_more" size={16} />
+              </button>
+            </div>
+            <input
+              value={c.label}
+              onChange={(e) => updateCol(c.id, { label: e.target.value })}
+              className="flex-1 min-w-0 rounded-md px-2.5 py-1.5 text-sm outline-none"
+              style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.text, fontFamily: T.bodyFont }}
+            />
+            <select
+              value={c.field || ""}
+              onChange={(e) => updateCol(c.id, { field: e.target.value })}
+              className="w-40 shrink-0 rounded-md px-2 py-1.5 text-xs outline-none"
+              style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textMuted, fontFamily: T.bodyFont }}
+            >
+              {fieldOptions.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+            </select>
+            <button type="button" onClick={() => removeCol(c.id)} disabled={columns.length <= 1} className="shrink-0 w-7 h-7 rounded-md flex items-center justify-center disabled:opacity-25" style={{ color: "#ba1a1a" }}>
+              <Icon name="delete" size={16} />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <button
+        type="button"
+        onClick={addCol}
+        className="mt-2 flex items-center gap-1.5 text-xs font-semibold"
+        style={{ color: accent, fontFamily: T.bodyFont }}
+      >
+        <Icon name="add" size={15} /> Add column
+      </button>
+      <p className="text-xs mt-2" style={{ color: T.textMuted }}>Columns mapped to "Custom / blank" always appear empty in the output for you to fill in by hand. Use the arrows to reorder.</p>
+    </div>
+  );
+}
+
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const WEEKDAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
@@ -422,11 +812,12 @@ function DatePicker({ value, onChange, accent }) {
   );
 }
 
-function TemplateEditor({ template, setTemplate, onReset, previewData, attTemplate, setAttTemplate, onResetAtt, templateMode, setTemplateMode }) {
+function TemplateEditor({ template, setTemplate, onReset, previewData, attTemplate, setAttTemplate, onResetAtt, dtTemplate, setDtTemplate, onResetDt, templateMode, setTemplateMode }) {
   const [saved, setSaved] = useState(false);
   const isAtt = templateMode === "attendance";
-  const current = isAtt ? attTemplate : template;
-  const setCurrent = isAtt ? setAttTemplate : setTemplate;
+  const isDt = templateMode === "dailytx";
+  const current = isDt ? dtTemplate : isAtt ? attTemplate : template;
+  const setCurrent = isDt ? setDtTemplate : isAtt ? setAttTemplate : setTemplate;
   const field = (key) => ({ value: current[key], onChange: (v) => setCurrent({ ...current, [key]: v }), accent: current.accent });
 
   function handleSave() {
@@ -440,11 +831,11 @@ function TemplateEditor({ template, setTemplate, onReset, previewData, attTempla
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
       <section className="lg:col-span-5 flex flex-col gap-5">
-        <div className="rounded-lg p-1 flex items-center gap-1 w-fit" style={{ background: T.surfaceLow, border: `1px solid ${T.border}` }}>
+        <div className="rounded-lg p-1 flex items-center gap-1 w-fit flex-wrap" style={{ background: T.surfaceLow, border: `1px solid ${T.border}` }}>
           <button
             onClick={() => setTemplateMode("sales")}
             className="px-4 py-1.5 rounded-md text-xs font-semibold transition-colors"
-            style={{ fontFamily: T.capsFont, letterSpacing: "0.06em", background: !isAtt ? template.accent : "transparent", color: !isAtt ? "#fff" : T.textMuted }}
+            style={{ fontFamily: T.capsFont, letterSpacing: "0.06em", background: !isAtt && !isDt ? template.accent : "transparent", color: !isAtt && !isDt ? "#fff" : T.textMuted }}
           >
             SALES REPORT
           </button>
@@ -454,6 +845,13 @@ function TemplateEditor({ template, setTemplate, onReset, previewData, attTempla
             style={{ fontFamily: T.capsFont, letterSpacing: "0.06em", background: isAtt ? attTemplate.accent : "transparent", color: isAtt ? "#fff" : T.textMuted }}
           >
             ATTENDANCE
+          </button>
+          <button
+            onClick={() => setTemplateMode("dailytx")}
+            className="px-4 py-1.5 rounded-md text-xs font-semibold transition-colors"
+            style={{ fontFamily: T.capsFont, letterSpacing: "0.06em", background: isDt ? dtTemplate.accent : "transparent", color: isDt ? "#fff" : T.textMuted }}
+          >
+            DAILY TRANSACTION
           </button>
         </div>
 
@@ -481,13 +879,14 @@ function TemplateEditor({ template, setTemplate, onReset, previewData, attTempla
               </div>
 
               <div className="pt-5">
-                <Label>Table column headers</Label>
-                <div className="grid grid-cols-2 gap-4">
-                  <TextField {...field("colNo")} />
-                  <TextField {...field("colOutlet")} />
-                  <TextField {...field("colProduct")} />
-                  <TextField {...field("colQty")} />
-                </div>
+                <ColumnListEditor
+                  columns={template.columns}
+                  setColumns={(cols) => setTemplate({ ...template, columns: cols })}
+                  fieldOptions={SALES_FIELD_OPTIONS}
+                  accent={template.accent}
+                  importKind="sales"
+                  importLabel="Table columns"
+                />
               </div>
             </>
           ) : (
@@ -497,15 +896,21 @@ function TemplateEditor({ template, setTemplate, onReset, previewData, attTempla
                   <Label>Report title</Label>
                   <TextField {...field("reportTitle")} />
                 </div>
-                <div className="grid grid-cols-3 gap-4">
-                  <div><Label>Employee ID label</Label><TextField {...field("idLabel")} /></div>
-                  <div><Label>Name label</Label><TextField {...field("nameLabel")} /></div>
-                  <div><Label>Department label</Label><TextField {...field("deptLabel")} /></div>
-                </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div><Label>Check-in label</Label><TextField {...field("checkInLabel")} /></div>
                   <div><Label>Check-out label</Label><TextField {...field("checkOutLabel")} /></div>
                 </div>
+              </div>
+
+              <div className="pt-5">
+                <ColumnListEditor
+                  columns={attTemplate.columns}
+                  setColumns={(cols) => setAttTemplate({ ...attTemplate, columns: cols })}
+                  fieldOptions={ATTENDANCE_FIELD_OPTIONS}
+                  accent={attTemplate.accent}
+                  importKind="attendance"
+                  importLabel="Employee columns (before the daily Check in / Check out)"
+                />
               </div>
             </>
           )}
@@ -627,19 +1032,17 @@ function TemplateEditor({ template, setTemplate, onReset, previewData, attTempla
                   <table className="w-full border-collapse text-sm" style={{ fontFamily: T.bodyFont }}>
                     <thead>
                       <tr style={{ background: T.surfaceContainer, borderTop: `2px solid ${template.accent}`, textAlign: "left" }}>
-                        <th className="p-2.5" style={{ fontFamily: T.capsFont, fontSize: 10 }}>{template.colNo}</th>
-                        <th className="p-2.5" style={{ fontFamily: T.capsFont, fontSize: 10 }}>{template.colOutlet}</th>
-                        <th className="p-2.5" style={{ fontFamily: T.capsFont, fontSize: 10 }}>{template.colProduct}</th>
-                        <th className="p-2.5 text-right" style={{ fontFamily: T.capsFont, fontSize: 10 }}>{template.colQty}</th>
+                        {template.columns.map((col) => (
+                          <th key={col.id} className={`p-2.5 ${col.field === "qty" ? "text-right" : ""}`} style={{ fontFamily: T.capsFont, fontSize: 10 }}>{col.label}</th>
+                        ))}
                       </tr>
                     </thead>
                     <tbody>
                       {previewData.sampleRows.map((row, i) => (
                         <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
-                          <td className="p-2.5">{row.no}</td>
-                          <td className="p-2.5">{row.outlet}</td>
-                          <td className="p-2.5">{row.product}</td>
-                          <td className="p-2.5 text-right">{row.qty}</td>
+                          {template.columns.map((col) => (
+                            <td key={col.id} className={`p-2.5 ${col.field === "qty" ? "text-right" : ""}`}>{col.field ? row[col.field] : ""}</td>
+                          ))}
                         </tr>
                       ))}
                     </tbody>
@@ -658,29 +1061,29 @@ function TemplateEditor({ template, setTemplate, onReset, previewData, attTempla
                 <table className="w-full border-collapse text-sm" style={{ fontFamily: T.bodyFont }}>
                   <thead>
                     <tr style={{ background: T.surfaceContainer, borderTop: `2px solid ${attTemplate.accent}`, textAlign: "left" }}>
-                      <th className="p-2.5" style={{ fontFamily: T.capsFont, fontSize: 10 }}>{attTemplate.idLabel}</th>
-                      <th className="p-2.5" style={{ fontFamily: T.capsFont, fontSize: 10 }}>{attTemplate.nameLabel}</th>
-                      <th className="p-2.5" style={{ fontFamily: T.capsFont, fontSize: 10 }}>{attTemplate.deptLabel}</th>
+                      {attTemplate.columns.map((col) => (
+                        <th key={col.id} className="p-2.5" style={{ fontFamily: T.capsFont, fontSize: 10 }}>{col.label}</th>
+                      ))}
                       <th className="p-2.5 text-center" colSpan={2} style={{ fontFamily: T.capsFont, fontSize: 10 }}>{sampleWeekLabel1}</th>
                     </tr>
                     <tr style={{ background: T.surfaceContainer, textAlign: "left" }}>
-                      <th className="p-2.5"></th><th className="p-2.5"></th><th className="p-2.5"></th>
+                      {attTemplate.columns.map((col) => <th key={col.id} className="p-2.5"></th>)}
                       <th className="p-2.5 text-center" style={{ fontFamily: T.capsFont, fontSize: 9, color: T.textMuted }}>{attTemplate.checkInLabel}</th>
                       <th className="p-2.5 text-center" style={{ fontFamily: T.capsFont, fontSize: 9, color: T.textMuted }}>{attTemplate.checkOutLabel}</th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-                      <td className="p-2.5">1750</td>
-                      <td className="p-2.5 font-semibold">Binusha</td>
-                      <td className="p-2.5">ICT</td>
+                      {attTemplate.columns.map((col) => (
+                        <td key={col.id} className="p-2.5">{col.field === "empId" ? "1750" : col.field === "name" ? "Binusha" : col.field === "dept" ? "ICT" : ""}</td>
+                      ))}
                       <td className="p-2.5 text-center">08:02</td>
                       <td className="p-2.5 text-center">17:15</td>
                     </tr>
                     <tr style={{ borderBottom: `1px solid ${T.border}`, background: attTemplate.bandingEnabled ? attTemplate.bandingColor : "transparent" }}>
-                      <td className="p-2.5">1751</td>
-                      <td className="p-2.5 font-semibold">Manohari</td>
-                      <td className="p-2.5">SA / Finance</td>
+                      {attTemplate.columns.map((col) => (
+                        <td key={col.id} className="p-2.5">{col.field === "empId" ? "1751" : col.field === "name" ? "Manohari" : col.field === "dept" ? "SA / Finance" : ""}</td>
+                      ))}
                       <td className="p-2.5 text-center">07:58</td>
                       <td className="p-2.5 text-center">17:02</td>
                     </tr>
@@ -803,7 +1206,7 @@ function AttendanceScreen({
                   onClick={() => exportAllAttendanceWeeksExcel(activeAttUpload)}
                   className="w-full py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
                   style={{ background: attTemplate.accent, color: "#fff", fontFamily: T.bodyFont }}
-                  title="You'll be asked where to save each week's file, one after another"
+                  title="Choose a folder once — all week files save there automatically"
                 >
                   <Icon name="folder_zip" size={16} /> Export All Weeks as Excel ({activeAttUpload.parsed.weeks.length})
                 </button>
@@ -815,7 +1218,7 @@ function AttendanceScreen({
                 >
                   <Icon name="picture_as_pdf" size={16} /> Export All Weeks as PDF ({activeAttUpload.parsed.weeks.length})
                 </button>
-                <p className="text-xs text-center -mt-2" style={{ color: T.textMuted }}>Excel prompts a save location per week. PDF opens a print tab per week — allow pop-ups if your browser blocks them.</p>
+                <p className="text-xs text-center -mt-2" style={{ color: T.textMuted }}>Excel: pick a destination folder once — every week saves there automatically. PDF opens a print tab per week — allow pop-ups if your browser blocks them.</p>
               </>
             )}
           </div>
@@ -864,9 +1267,9 @@ function AttendanceScreen({
               <table className="text-sm" style={{ minWidth: 620 + activeAttWeekDates.length * 160 }}>
                 <thead>
                   <tr>
-                    <th rowSpan={2} className="text-left px-4 py-2.5 align-bottom" style={{ background: T.surfaceContainer, borderTop: `2px solid ${attTemplate.accent}`, fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{attTemplate.idLabel}</th>
-                    <th rowSpan={2} className="text-left px-4 py-2.5 align-bottom" style={{ background: T.surfaceContainer, borderTop: `2px solid ${attTemplate.accent}`, fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{attTemplate.nameLabel}</th>
-                    <th rowSpan={2} className="text-left px-4 py-2.5 align-bottom" style={{ background: T.surfaceContainer, borderTop: `2px solid ${attTemplate.accent}`, fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{attTemplate.deptLabel}</th>
+                    {attTemplate.columns.map((col) => (
+                      <th key={col.id} rowSpan={2} className="text-left px-4 py-2.5 align-bottom" style={{ background: T.surfaceContainer, borderTop: `2px solid ${attTemplate.accent}`, fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{col.label}</th>
+                    ))}
                     {activeAttWeekDates.map((d) => (
                       <th key={d} colSpan={2} className="text-center px-2 py-1.5" style={{ background: T.surfaceContainer, borderTop: `2px solid ${attTemplate.accent}`, borderLeft: `1px solid ${T.border}`, fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.06em", color: T.text }}>{formatAttDate(d)}</th>
                     ))}
@@ -885,9 +1288,11 @@ function AttendanceScreen({
                     const banded = attTemplate.bandingEnabled && idx % 2 === 1;
                     return (
                       <tr key={emp.empId} style={{ borderBottom: `1px solid ${T.border}`, background: banded ? attTemplate.bandingColor : "transparent" }}>
-                        <td className="px-4 py-2" style={{ color: T.textMuted }}>{emp.empId}</td>
-                        <td className="px-4 py-2 font-semibold">{emp.name}</td>
-                        <td className="px-4 py-2">{emp.dept}</td>
+                        {attTemplate.columns.map((col, ci) => (
+                          <td key={col.id} className={`px-4 py-2 ${ci === 1 ? "font-semibold" : ""}`} style={ci === 0 ? { color: T.textMuted } : undefined}>
+                            {col.field === "empId" ? emp.empId : col.field === "name" ? emp.name : col.field === "dept" ? emp.dept : ""}
+                          </td>
+                        ))}
                         {emp.cells.map((c, i) => (
                           <Fragment key={i}>
                             <td className="px-2 py-2 text-center tabular-nums" style={{ borderLeft: `1px solid ${T.border}` }}>{c.checkIn || "—"}</td>
@@ -907,6 +1312,194 @@ function AttendanceScreen({
   );
 }
 
+function DailyTransactionScreen({
+  dtTemplate,
+  dtUploads,
+  dtActiveId,
+  setDtActiveId,
+  activeDtUpload,
+  activeDtRows,
+  dtRoster,
+  dtFileInputRef,
+  handleDtFiles,
+  removeDtUpload,
+  exportDtExcelFor,
+  exportDtPdfFor,
+  exportAllDtExcel,
+  exportAllDtPdf,
+}) {
+  const canExportActive = Boolean(activeDtUpload && activeDtUpload.parsed && activeDtRows.length > 0);
+  const presentCount = activeDtRows.reduce((set, r) => { if (!r.absent) set.add(r.groupKey); return set; }, new Set()).size;
+  const absentCount = dtRoster.length - presentCount;
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+      <div className="lg:col-span-4 flex flex-col gap-5">
+        <div className="rounded-lg p-5" style={{ background: T.surface, border: `1px solid ${T.border}` }}>
+          <Label>Step 1: Upload transaction report(s)</Label>
+          <div
+            onClick={() => dtFileInputRef.current?.click()}
+            onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files.length) handleDtFiles(e.dataTransfer.files); }}
+            onDragOver={(e) => e.preventDefault()}
+            className="rounded-lg p-6 text-center cursor-pointer transition-colors"
+            style={{ border: `2px dashed ${T.border}` }}
+          >
+            <Icon name="cloud_upload" size={30} style={{ color: T.textMuted }} />
+            <p className="text-sm font-semibold mt-2">Drop files here or click</p>
+            <p className="text-xs mt-1" style={{ color: T.textMuted }}>Daily punch/transaction export (.xlsx). Any of the file layouts you use are accepted — one file per day.</p>
+            <input ref={dtFileInputRef} type="file" accept=".xlsx,.xls" multiple className="hidden" onChange={(e) => { if (e.target.files.length) handleDtFiles(e.target.files); e.target.value = ""; }} />
+          </div>
+          {dtUploads.length > 0 && (
+            <p className="mt-3 text-sm flex items-center gap-1.5" style={{ color: "#2E7A4E" }}><Icon name="check_circle" size={16} />{dtUploads.length} file{dtUploads.length === 1 ? "" : "s"} uploaded</p>
+          )}
+          {dtRoster.length > 0 && (
+            <p className="mt-2 text-xs flex items-center gap-1.5" style={{ color: T.textMuted }}><Icon name="groups" size={14} />{dtRoster.length} employees remembered in your staff list</p>
+          )}
+        </div>
+
+        {dtUploads.length > 0 && (
+          <div className="flex flex-col gap-4">
+            {dtUploads.map((u) => {
+              const isActive = u.id === dtActiveId;
+              return (
+                <div
+                  key={u.id}
+                  onClick={() => setDtActiveId(u.id)}
+                  className="rounded-lg p-4 cursor-pointer transition-colors"
+                  style={{ background: T.surface, border: `2px solid ${isActive ? dtTemplate.accent : T.border}` }}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <Icon name="fingerprint" size={16} style={{ color: isActive ? dtTemplate.accent : T.textMuted, flexShrink: 0 }} />
+                      <span className="text-sm font-semibold truncate" title={u.fileName}>{u.fileName}</span>
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); removeDtUpload(u.id); }}
+                      className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center hover:bg-black/5"
+                      style={{ color: T.textMuted }}
+                      title="Remove"
+                    >
+                      <Icon name="close" size={15} />
+                    </button>
+                  </div>
+
+                  {u.parseError && (
+                    <p className="text-xs flex items-start gap-1.5" style={{ color: "#ba1a1a" }}><Icon name="error" size={14} />{u.parseError}</p>
+                  )}
+
+                  {u.parsed && (
+                    <p className="text-xs" style={{ color: T.textMuted }}>
+                      {u.parsed.date ? `Date: ${u.parsed.date} · ` : ""}{u.parsed.employees.length} employees with punches
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+
+            {dtUploads.filter((u) => u.parsed).length > 1 && (
+              <>
+                <button
+                  onClick={exportAllDtExcel}
+                  className="w-full py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
+                  style={{ background: dtTemplate.accent, color: "#fff", fontFamily: T.bodyFont }}
+                  title="Choose a folder once — every day's file saves there automatically"
+                >
+                  <Icon name="folder_zip" size={16} /> Export All Days as Excel ({dtUploads.filter((u) => u.parsed).length})
+                </button>
+                <button
+                  onClick={exportAllDtPdf}
+                  className="w-full py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
+                  style={{ background: T.surface, color: dtTemplate.accent, border: `1.5px solid ${dtTemplate.accent}`, fontFamily: T.bodyFont }}
+                  title="Opens a print tab for each day, one after another"
+                >
+                  <Icon name="picture_as_pdf" size={16} /> Export All Days as PDF ({dtUploads.filter((u) => u.parsed).length})
+                </button>
+                <p className="text-xs text-center -mt-2" style={{ color: T.textMuted }}>Excel: pick a destination folder once — every day saves there automatically. PDF opens a print tab per day — allow pop-ups if your browser blocks them.</p>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="lg:col-span-8">
+        {!activeDtUpload || !activeDtUpload.parsed ? (
+          <div className="h-full flex flex-col items-center justify-center text-sm py-24 rounded-lg" style={{ border: `2px dashed ${T.border}`, color: T.textMuted }}>
+            <Icon name="fingerprint" size={28} style={{ color: T.textMuted }} />
+            <p className="mt-2">Upload a transaction report to see the daily punch sheet here</p>
+          </div>
+        ) : (
+          <div className="rounded-lg overflow-hidden" style={{ background: T.surface, border: `1px solid ${T.border}` }}>
+            <div className="p-6 flex items-center justify-between flex-wrap gap-3" style={{ background: dtTemplate.accent }}>
+              <div>
+                <h2 style={{ fontFamily: T.headFont, fontSize: 22, fontWeight: 700, color: "#fff" }}>{dtTemplate.reportTitle}</h2>
+                <p className="text-sm opacity-85 mt-1" style={{ color: "#fff" }}>Date: {activeDtUpload.parsed.date || "unknown"}</p>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => exportDtExcelFor(activeDtUpload)} disabled={!canExportActive} className="flex items-center gap-1.5 disabled:opacity-40 text-xs font-bold px-3.5 py-2 rounded-lg" style={{ background: "#fff", color: dtTemplate.accent }}>
+                  <Icon name="grid_on" size={15} /> Download Excel
+                </button>
+                <button onClick={() => exportDtPdfFor(activeDtUpload)} disabled={!canExportActive} className="flex items-center gap-1.5 disabled:opacity-40 text-xs font-bold px-3.5 py-2 rounded-lg" style={{ background: "rgba(0,0,0,0.2)", color: "#fff" }}>
+                  <Icon name="picture_as_pdf" size={15} /> Download PDF
+                </button>
+              </div>
+            </div>
+
+            <div className="p-5 grid grid-cols-3 gap-4" style={{ borderBottom: `1px solid ${T.border}` }}>
+              <div className="rounded-lg p-4" style={{ border: `1px solid ${T.border}` }}>
+                <p style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>STAFF LIST</p>
+                <p style={{ fontFamily: T.headFont, fontSize: 22, fontWeight: 700 }} className="mt-1">{dtRoster.length}</p>
+              </div>
+              <div className="rounded-lg p-4" style={{ border: `1px solid ${T.border}` }}>
+                <p style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>PRESENT TODAY</p>
+                <p style={{ fontFamily: T.headFont, fontSize: 22, fontWeight: 700, color: dtTemplate.accent }} className="mt-1">{presentCount}</p>
+              </div>
+              <div className="rounded-lg p-4" style={{ border: `1px solid ${T.border}` }}>
+                <p style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>ABSENT ({dtTemplate.absentPlaceholder})</p>
+                <p style={{ fontFamily: T.headFont, fontSize: 22, fontWeight: 700 }} className="mt-1">{Math.max(0, absentCount)}</p>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto max-h-[560px] overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 z-10">
+                  <tr>
+                    {dtTemplate.columns.map((col) => (
+                      <th key={col.id} className="text-left px-4 py-2.5" style={{ background: T.surfaceContainer, borderTop: `2px solid ${dtTemplate.accent}`, fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{col.label}</th>
+                    ))}
+                    <th className="text-left px-4 py-2.5" style={{ background: T.surfaceContainer, borderTop: `2px solid ${dtTemplate.accent}`, fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{dtTemplate.timeLabel}</th>
+                    <th className="text-left px-4 py-2.5" style={{ background: T.surfaceContainer, borderTop: `2px solid ${dtTemplate.accent}`, fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{dtTemplate.stateLabel}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    let groupToggle = false;
+                    let lastGroupKey = null;
+                    return activeDtRows.map((row, idx) => {
+                      if (row.groupKey !== lastGroupKey) { groupToggle = !groupToggle; lastGroupKey = row.groupKey; }
+                      const banded = dtTemplate.bandingEnabled && groupToggle;
+                      return (
+                        <tr key={idx} style={{ borderBottom: `1px solid ${T.border}`, background: banded ? dtTemplate.bandingColor : "transparent" }}>
+                          {dtTemplate.columns.map((col, ci) => (
+                            <td key={col.id} className={`px-4 py-2 ${ci === 1 ? "font-semibold" : ""}`} style={ci === 0 ? { color: T.textMuted } : undefined}>
+                              {dtCellValue(col.field, row)}
+                            </td>
+                          ))}
+                          <td className="px-4 py-2 tabular-nums" style={row.absent ? { color: T.textMuted } : undefined}>{row.time}</td>
+                          <td className="px-4 py-2" style={row.absent ? { color: T.textMuted } : undefined}>{row.state}</td>
+                        </tr>
+                      );
+                    });
+                  })()}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [screen, setScreen] = useState("dashboard");
   const [templateMode, setTemplateMode] = useState("sales");
@@ -914,6 +1507,8 @@ export default function App() {
   const [templateLoaded, setTemplateLoaded] = useState(false);
   const [attTemplate, setAttTemplate] = useState(ATTENDANCE_DEFAULT_TEMPLATE);
   const [attTemplateLoaded, setAttTemplateLoaded] = useState(false);
+  const [dtTemplate, setDtTemplate] = useState(DAILY_TX_DEFAULT_TEMPLATE);
+  const [dtTemplateLoaded, setDtTemplateLoaded] = useState(false);
 
   const [uploads, setUploads] = useState([]);
   const [activeId, setActiveId] = useState(null);
@@ -931,7 +1526,11 @@ export default function App() {
   useEffect(() => {
     try {
       const saved = localStorage.getItem("attendance-template-config");
-      if (saved) setAttTemplate({ ...ATTENDANCE_DEFAULT_TEMPLATE, ...JSON.parse(saved) });
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (!Array.isArray(parsed.columns) || parsed.columns.length === 0) delete parsed.columns;
+        setAttTemplate({ ...ATTENDANCE_DEFAULT_TEMPLATE, ...parsed });
+      }
     } catch (e) {}
     finally { setAttTemplateLoaded(true); }
   }, []);
@@ -940,6 +1539,23 @@ export default function App() {
     if (!attTemplateLoaded) return;
     try { localStorage.setItem("attendance-template-config", JSON.stringify(attTemplate)); } catch (e) {}
   }, [attTemplate, attTemplateLoaded]);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("daily-tx-template-config");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (!Array.isArray(parsed.columns) || parsed.columns.length === 0) delete parsed.columns;
+        setDtTemplate({ ...DAILY_TX_DEFAULT_TEMPLATE, ...parsed });
+      }
+    } catch (e) {}
+    finally { setDtTemplateLoaded(true); }
+  }, []);
+
+  useEffect(() => {
+    if (!dtTemplateLoaded) return;
+    try { localStorage.setItem("daily-tx-template-config", JSON.stringify(dtTemplate)); } catch (e) {}
+  }, [dtTemplate, dtTemplateLoaded]);
 
   const activeAttUpload = attUploads.find((u) => u.id === attActiveId) || null;
   const activeAttWeekDates = activeAttUpload && activeAttUpload.parsed ? (activeAttUpload.parsed.weeks[attWeekIndex] || []) : [];
@@ -985,10 +1601,79 @@ export default function App() {
     });
   }
 
+  const [dtUploads, setDtUploads] = useState([]);
+  const [dtActiveId, setDtActiveId] = useState(null);
+  const [dtRoster, setDtRoster] = useState([]);
+  const [dtRosterLoaded, setDtRosterLoaded] = useState(false);
+  const dtFileInputRef = useRef(null);
+  const dtUploadCounter = useRef(0);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("daily-tx-roster");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) setDtRoster(parsed);
+      }
+    } catch (e) {}
+    finally { setDtRosterLoaded(true); }
+  }, []);
+
+  useEffect(() => {
+    if (!dtRosterLoaded) return;
+    try { localStorage.setItem("daily-tx-roster", JSON.stringify(dtRoster)); } catch (e) {}
+  }, [dtRoster, dtRosterLoaded]);
+
+  const activeDtUpload = dtUploads.find((u) => u.id === dtActiveId) || null;
+  const activeDtRows = activeDtUpload && activeDtUpload.parsed ? buildDailyTxRows(dtRoster, activeDtUpload.parsed, dtTemplate.absentPlaceholder) : [];
+
+  function updateDtUpload(id, patch) {
+    setDtUploads((prev) => prev.map((u) => (u.id === id ? { ...u, ...patch } : u)));
+  }
+
+  function removeDtUpload(id) {
+    setDtUploads((prev) => prev.filter((u) => u.id !== id));
+    if (dtActiveId === id) {
+      setDtActiveId((prevActive) => {
+        const remaining = dtUploads.filter((u) => u.id !== id);
+        return remaining.length ? remaining[0].id : null;
+      });
+    }
+  }
+
+  function handleDtFiles(fileList) {
+    const files = Array.from(fileList || []);
+    files.forEach((file) => {
+      dtUploadCounter.current += 1;
+      const id = `dt-upload-${Date.now()}-${dtUploadCounter.current}`;
+      const draft = { id, fileName: file.name, parsed: null, parseError: null };
+      setDtUploads((prev) => [...prev, draft]);
+      setDtActiveId((prev) => prev || id);
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const wb = XLSX.read(e.target.result, { type: "array" });
+          const parsed = parseDailyTransactionWorkbook(wb);
+          updateDtUpload(id, { parsed, parseError: null });
+          setDtRoster((prev) => mergeRoster(prev, parsed.employees));
+        } catch (err) {
+          updateDtUpload(id, { parsed: null, parseError: err.message || "Couldn't read this file." });
+        }
+      };
+      reader.onerror = () => updateDtUpload(id, { parsed: null, parseError: "The file could not be read." });
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
   useEffect(() => {
     try {
       const saved = localStorage.getItem("template-config");
-      if (saved) setTemplate({ ...DEFAULT_TEMPLATE, ...JSON.parse(saved) });
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (!Array.isArray(parsed.columns) || parsed.columns.length === 0) delete parsed.columns;
+        setTemplate({ ...DEFAULT_TEMPLATE, ...parsed });
+      }
     } catch (e) {}
     finally { setTemplateLoaded(true); }
   }, []);
@@ -1073,7 +1758,28 @@ export default function App() {
     updateUpload(activeUpload.id, { territory: firstTerritory, routeName: firstRoute, lastVisitDate: "", strategy: "fallback" });
   }
 
-  async function saveBlob(blob, suggestedName, { pickLocation = true } = {}) {
+  async function pickDirectory() {
+    if (!window.showDirectoryPicker) return null;
+    try {
+      return await window.showDirectoryPicker({ mode: "readwrite" });
+    } catch (err) {
+      return null; // user cancelled, or not supported/permitted
+    }
+  }
+
+  async function saveBlob(blob, suggestedName, { pickLocation = true, dirHandle = null } = {}) {
+    if (dirHandle) {
+      try {
+        const fileHandle = await dirHandle.getFileHandle(suggestedName, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        return true;
+      } catch (err) {
+        // fall through to normal download if writing into the folder fails
+      }
+    }
+
     if (pickLocation && window.showSaveFilePicker) {
       try {
         const handle = await window.showSaveFilePicker({
@@ -1098,18 +1804,20 @@ export default function App() {
     return true;
   }
 
-  async function exportExcelFor(upload, rep, exportAllMode = false) {
+  async function exportExcelFor(upload, rep, exportAllMode = false, dirHandle = null) {
     if (!rep) return;
+    const cols = template.columns;
+    const colCount = cols.length;
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Report");
-    ws.columns = [{ width: 6 }, { width: 30 }, { width: 44 }, { width: 12 }];
+    ws.columns = cols.map((c) => ({ width: c.field === "product" ? 44 : c.field === "outlet" ? 30 : c.field === "no" ? 6 : 20 }));
 
     const accentARGB = "FF" + template.accent.replace("#", "").toUpperCase();
     const thin = { style: "thin", color: { argb: "FFCBBFAE" } };
     const borderAll = { top: thin, left: thin, bottom: thin, right: thin };
 
-    ws.mergeCells("A1:D1");
-    const titleCell = ws.getCell("A1");
+    ws.mergeCells(1, 1, 1, colCount);
+    const titleCell = ws.getCell(1, 1);
     titleCell.value = template.reportTitle;
     titleCell.font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
     titleCell.alignment = { horizontal: "center", vertical: "middle" };
@@ -1124,21 +1832,20 @@ export default function App() {
     ];
     metaRows.forEach(([label, value], i) => {
       const rowNum = i + 2;
-      const labelCell = ws.getCell(`A${rowNum}`);
+      const labelCell = ws.getCell(rowNum, 1);
       labelCell.value = label;
       labelCell.font = { bold: true };
-      ws.mergeCells(`B${rowNum}:D${rowNum}`);
-      ws.getCell(`B${rowNum}`).value = value;
+      if (colCount > 1) ws.mergeCells(rowNum, 2, rowNum, colCount);
+      ws.getCell(rowNum, 2).value = value;
     });
 
     const headerRowNum = 7;
-    const headers = [template.colNo, template.colOutlet, template.colProduct, template.colQty];
-    headers.forEach((h, i) => {
+    cols.forEach((col, i) => {
       const cell = ws.getCell(headerRowNum, i + 1);
-      cell.value = h;
+      cell.value = col.label;
       cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: accentARGB } };
-      cell.alignment = { vertical: "middle", horizontal: i === 3 ? "right" : "left" };
+      cell.alignment = { vertical: "middle", horizontal: col.field === "qty" ? "right" : "left" };
       cell.border = borderAll;
     });
 
@@ -1150,47 +1857,60 @@ export default function App() {
       outlet.items.forEach((item, i) => {
         r += 1;
         const row = ws.getRow(r);
-        row.getCell(1).value = i === 0 ? idx + 1 : null;
-        row.getCell(2).value = i === 0 ? outlet.name : null;
-        row.getCell(3).value = item.product;
-        row.getCell(4).value = item.qty;
-        [1, 2, 3, 4].forEach((c) => {
-          row.getCell(c).border = borderAll;
-          if (banded) row.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: bandARGB } };
+        cols.forEach((col, ci) => {
+          const isMerge = SALES_MERGE_FIELDS.has(col.field);
+          const cell = row.getCell(ci + 1);
+          cell.value = (!isMerge || i === 0) ? salesCellValue(col.field, { outletIdx: idx, item, isFirst: true, outlet }) : null;
+          cell.border = borderAll;
+          cell.alignment = { horizontal: col.field === "qty" ? "right" : "left", vertical: "middle" };
+          if (banded) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bandARGB } };
         });
-        row.getCell(4).alignment = { horizontal: "right" };
-        row.getCell(3).alignment = { vertical: "middle" };
       });
       const endRow = r;
       if (outlet.items.length > 1) {
-        ws.mergeCells(startRow, 1, endRow, 1);
-        ws.mergeCells(startRow, 2, endRow, 2);
+        cols.forEach((col, ci) => {
+          if (SALES_MERGE_FIELDS.has(col.field)) {
+            ws.mergeCells(startRow, ci + 1, endRow, ci + 1);
+            ws.getCell(startRow, ci + 1).alignment = { vertical: "middle", horizontal: col.field === "no" ? "center" : "left" };
+          }
+        });
       }
-      ws.getCell(startRow, 1).alignment = { vertical: "middle", horizontal: "center" };
-      ws.getCell(startRow, 2).alignment = { vertical: "middle" };
     });
 
     const buf = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], { type: "application/octet-stream" });
     const safeRoute = (upload.routeName || upload.territory).replace(/[^a-z0-9]+/gi, "_").slice(0, 40);
     const fileName = `${upload.territory}_${safeRoute}_LastVisit.xlsx`;
-    return saveBlob(blob, fileName, { pickLocation: exportAllMode !== true });
+    return saveBlob(blob, fileName, { pickLocation: exportAllMode !== true, dirHandle });
   }
 
-  function exportPdfFor(upload, rep) {
+  function exportPdfFor(upload, rep, cleanStyle = false) {
     if (!rep) return;
+    const cols = template.columns;
     const win = window.open("", "_blank");
     const rowsHtml = rep.outlets.map((outlet, idx) => {
       const banded = template.bandingEnabled && idx % 2 === 1;
-      const bg = banded ? ` style="background:${template.bandingColor}"` : "";
-      return outlet.items.map((item, i) => `
-      <tr${bg}>
-        <td>${i === 0 ? idx + 1 : ""}</td>
-        <td>${i === 0 ? outlet.name : ""}</td>
-        <td>${item.product}</td>
-        <td style="text-align:right">${item.qty}</td>
-      </tr>`).join("");
+      const groupClass = cleanStyle && idx > 0 ? " outlet-start" : "";
+      const bg = banded ? `background:${template.bandingColor};` : "";
+      return outlet.items.map((item, i) => {
+        const cells = cols.map((col) => {
+          const isMerge = SALES_MERGE_FIELDS.has(col.field);
+          const val = (!isMerge || i === 0) ? salesCellValue(col.field, { outletIdx: idx, item, isFirst: true, outlet }) : "";
+          const align = col.field === "qty" ? ' style="text-align:right"' : "";
+          return `<td${align}>${escapeAttHtml(val)}</td>`;
+        }).join("");
+        const rowClass = i === 0 ? groupClass.trim() : "";
+        const classAttr = rowClass ? ` class="${rowClass}"` : "";
+        const styleAttr = bg ? ` style="${bg}"` : "";
+        return `<tr${classAttr}${styleAttr}>${cells}</tr>`;
+      }).join("");
     }).join("");
+
+    const headHtml = cols.map((col) => `<th${col.field === "qty" ? ' style="text-align:right"' : ""}>${escapeAttHtml(col.label)}</th>`).join("");
+
+    const rowCss = cleanStyle
+      ? `td{padding:9px 10px;border-bottom:none;} tr.outlet-start td{border-top:1px solid #e2d9d3;} table{border:1px solid #e2d9d3;}`
+      : `td{padding:5px 8px;border-bottom:1px solid #eee;}`;
 
     win.document.write(`
       <html><head><title>${upload.territory} - ${upload.routeName}</title>
@@ -1198,8 +1918,8 @@ export default function App() {
         body{font-family:${T.bodyFont};color:${T.text};padding:32px;}
         h1{font-family:${T.headFont};text-align:center;color:white;background:${template.accent};padding:14px;border-radius:6px;font-size:18px;margin-bottom:20px;}
         table{width:100%;border-collapse:collapse;margin-top:16px;font-size:12px;}
-        th{text-align:left;border-bottom:2px solid ${template.accent};color:${template.accent};padding:6px 8px;}
-        td{padding:5px 8px;border-bottom:1px solid #eee;}
+        th{text-align:left;border-bottom:2px solid ${template.accent};color:${template.accent};padding:8px 10px;}
+        ${rowCss}
         .meta{display:grid;grid-template-columns:160px 1fr;row-gap:6px;font-size:13px;}
         .meta b{color:${T.textMuted};}
         @media print{ body{padding:0;} }
@@ -1211,7 +1931,7 @@ export default function App() {
         <b>${template.totalLabel}</b><span>${rep.totalSale.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
         <b>${template.dateLabel}</b><span>${upload.lastVisitDate || "________________"}</span>
       </div>
-      <table><thead><tr><th>${template.colNo}</th><th>${template.colOutlet}</th><th>${template.colProduct}</th><th style="text-align:right">${template.colQty}</th></tr></thead>
+      <table><thead><tr>${headHtml}</tr></thead>
       <tbody>${rowsHtml}</tbody></table>
       </body></html>`);
     win.document.close();
@@ -1223,34 +1943,42 @@ export default function App() {
   function exportPdf() { if (activeUpload && report) exportPdfFor(activeUpload, report); }
 
   async function exportAllExcel() {
-    for (const upload of uploads) {
-      if (!upload.rows || !upload.territory) continue;
+    const exportable = uploads.filter((u) => u.rows && u.territory && buildReport(u.rows, u.territory, u.routeName, u.strategy).outlets.length > 0);
+    if (exportable.length === 0) return;
+
+    const dirHandle = exportable.length > 1 ? await pickDirectory() : null;
+
+    for (const upload of exportable) {
       const rep = buildReport(upload.rows, upload.territory, upload.routeName, upload.strategy);
-      if (rep.outlets.length === 0) continue;
-      await exportExcelFor(upload, rep);
+      await exportExcelFor(upload, rep, true, dirHandle);
     }
   }
 
   function exportAllPdf() {
-    for (const upload of uploads) {
-      if (!upload.rows || !upload.territory) continue;
-      const rep = buildReport(upload.rows, upload.territory, upload.routeName, upload.strategy);
-      if (rep.outlets.length === 0) continue;
-      exportPdfFor(upload, rep);
-    }
+    uploads.forEach((upload) => {
+      if (!upload.rows) return;
+      const combos = getTerritoryRouteCombos(upload.rows);
+      combos.forEach((combo) => {
+        const rep = buildReport(upload.rows, combo.territory, combo.routeName, upload.strategy);
+        if (rep.outlets.length === 0) return;
+        exportPdfFor({ ...upload, territory: combo.territory, routeName: combo.routeName }, rep, true);
+      });
+    });
   }
 
-  async function exportAttendanceExcelFor(upload, weekDates, weekIdx, pickLocation = true) {
+  async function exportAttendanceExcelFor(upload, weekDates, weekIdx, pickLocation = true, dirHandle = null) {
     const rowsData = buildAttendanceRows(upload.parsed, weekDates);
+    const leadCols = attTemplate.columns;
+    const leadCount = leadCols.length;
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Attendance");
-    ws.columns = [{ width: 12 }, { width: 18 }, { width: 16 }, ...weekDates.flatMap(() => [{ width: 11 }, { width: 11 }])];
+    ws.columns = [...leadCols.map(() => ({ width: 16 })), ...weekDates.flatMap(() => [{ width: 11 }, { width: 11 }])];
 
     const accentARGB = "FF" + attTemplate.accent.replace("#", "").toUpperCase();
     const thin = { style: "thin", color: { argb: "FFCBBFAE" } };
     const borderAll = { top: thin, left: thin, bottom: thin, right: thin };
 
-    ws.mergeCells(1, 1, 1, 3);
+    ws.mergeCells(1, 1, 1, leadCount);
     const titleCell = ws.getCell(1, 1);
     titleCell.value = attTemplate.reportTitle;
     titleCell.font = { bold: true, size: 13, color: { argb: "FFFFFFFF" } };
@@ -1259,7 +1987,7 @@ export default function App() {
     ws.getRow(1).height = 22;
 
     weekDates.forEach((d, i) => {
-      const startCol = 4 + i * 2;
+      const startCol = leadCount + 1 + i * 2;
       ws.mergeCells(1, startCol, 1, startCol + 1);
       const cell = ws.getCell(1, startCol);
       cell.value = formatAttDate(d);
@@ -1268,7 +1996,7 @@ export default function App() {
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: accentARGB } };
     });
 
-    const headerLabels = [attTemplate.idLabel, attTemplate.nameLabel, attTemplate.deptLabel, ...weekDates.flatMap(() => [attTemplate.checkInLabel, attTemplate.checkOutLabel])];
+    const headerLabels = [...leadCols.map((c) => c.label), ...weekDates.flatMap(() => [attTemplate.checkInLabel, attTemplate.checkOutLabel])];
     headerLabels.forEach((label, i) => {
       const cell = ws.getCell(2, i + 1);
       cell.value = label;
@@ -1282,12 +2010,12 @@ export default function App() {
     rowsData.forEach((emp, idx) => {
       const rowNum = idx + 3;
       const banded = attTemplate.bandingEnabled && idx % 2 === 1;
-      const values = [emp.empId, emp.name, emp.dept, ...emp.cells.flatMap((c) => [c.checkIn, c.checkOut])];
+      const values = [...leadCols.map((c) => attCellValue(c.field, emp)), ...emp.cells.flatMap((c) => [c.checkIn, c.checkOut])];
       values.forEach((v, i) => {
         const cell = ws.getCell(rowNum, i + 1);
         cell.value = v;
         cell.border = borderAll;
-        cell.alignment = { horizontal: i < 3 ? "left" : "center", vertical: "middle" };
+        cell.alignment = { horizontal: i < leadCount ? "left" : "center", vertical: "middle" };
         if (banded) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bandARGB } };
       });
     });
@@ -1296,19 +2024,22 @@ export default function App() {
     const blob = new Blob([buf], { type: "application/octet-stream" });
     const label = weekRangeLabel(weekDates).replace(/[^a-z0-9]+/gi, "_");
     const fileName = `Attendance_Week${weekIdx + 1}_${label}.xlsx`;
-    return saveBlob(blob, fileName, { pickLocation });
+    return saveBlob(blob, fileName, { pickLocation, dirHandle });
   }
 
   function exportAttendancePdfFor(upload, weekDates) {
     const rowsData = buildAttendanceRows(upload.parsed, weekDates);
+    const leadCols = attTemplate.columns;
     const win = window.open("", "_blank");
     const headCells = weekDates.map((d) => `<th colspan="2">${escapeAttHtml(formatAttDate(d))}</th>`).join("");
     const subCells = weekDates.map(() => `<th>${escapeAttHtml(attTemplate.checkInLabel)}</th><th>${escapeAttHtml(attTemplate.checkOutLabel)}</th>`).join("");
+    const leadHeadHtml = leadCols.map((c) => `<th rowspan="2">${escapeAttHtml(c.label)}</th>`).join("");
     const rowsHtml = rowsData.map((emp, idx) => {
       const banded = attTemplate.bandingEnabled && idx % 2 === 1;
       const bg = banded ? ` style="background:${attTemplate.bandingColor}"` : "";
+      const leadCells = leadCols.map((c) => `<td>${escapeAttHtml(attCellValue(c.field, emp))}</td>`).join("");
       const cells = emp.cells.map((c) => `<td>${escapeAttHtml(c.checkIn)}</td><td>${escapeAttHtml(c.checkOut)}</td>`).join("");
-      return `<tr${bg}><td>${escapeAttHtml(emp.empId)}</td><td>${escapeAttHtml(emp.name)}</td><td>${escapeAttHtml(emp.dept)}</td>${cells}</tr>`;
+      return `<tr${bg}>${leadCells}${cells}</tr>`;
     }).join("");
 
     win.document.write(`
@@ -1319,13 +2050,13 @@ export default function App() {
         table{width:100%;border-collapse:collapse;font-size:11px;}
         th{background:${attTemplate.accent};color:#fff;padding:6px 4px;border:1px solid #ccc;}
         td{padding:4px;border:1px solid #ddd;text-align:center;}
-        td:nth-child(2){text-align:left;} td:nth-child(3){text-align:left;}
+        td:nth-child(2){text-align:left;}
         @media print{ body{padding:0;} }
       </style></head><body>
       <h1>${attTemplate.reportTitle} — ${weekRangeLabel(weekDates)}</h1>
       <table>
         <thead>
-          <tr><th rowspan="2">${attTemplate.idLabel}</th><th rowspan="2">${attTemplate.nameLabel}</th><th rowspan="2">${attTemplate.deptLabel}</th>${headCells}</tr>
+          <tr>${leadHeadHtml}${headCells}</tr>
           <tr>${subCells}</tr>
         </thead>
         <tbody>${rowsHtml}</tbody>
@@ -1337,13 +2068,129 @@ export default function App() {
   }
 
   async function exportAllAttendanceWeeksExcel(upload) {
+    if (!upload.parsed || upload.parsed.weeks.length === 0) return;
+    const dirHandle = upload.parsed.weeks.length > 1 ? await pickDirectory() : null;
     for (let i = 0; i < upload.parsed.weeks.length; i++) {
-      await exportAttendanceExcelFor(upload, upload.parsed.weeks[i], i);
+      await exportAttendanceExcelFor(upload, upload.parsed.weeks[i], i, false, dirHandle);
     }
   }
 
   function exportAllAttendanceWeeksPdf(upload) {
     upload.parsed.weeks.forEach((weekDates) => exportAttendancePdfFor(upload, weekDates));
+  }
+
+  async function exportDtExcelFor(upload, exportAllMode = false, dirHandle = null) {
+    if (!upload.parsed) return;
+    const rows = buildDailyTxRows(dtRoster, upload.parsed, dtTemplate.absentPlaceholder);
+    const leadCols = dtTemplate.columns;
+    const leadCount = leadCols.length;
+    const totalCols = leadCount + 2;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Transaction");
+    ws.columns = [...leadCols.map(() => ({ width: 16 })), { width: 12 }, { width: 14 }];
+
+    const accentARGB = "FF" + dtTemplate.accent.replace("#", "").toUpperCase();
+    const thin = { style: "thin", color: { argb: "FFCBBFAE" } };
+    const borderAll = { top: thin, left: thin, bottom: thin, right: thin };
+
+    ws.mergeCells(1, 1, 1, totalCols);
+    const titleCell = ws.getCell(1, 1);
+    titleCell.value = dtTemplate.reportTitle;
+    titleCell.font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
+    titleCell.alignment = { horizontal: "center", vertical: "middle" };
+    titleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: accentARGB } };
+    ws.getRow(1).height = 24;
+
+    ws.mergeCells(2, 1, 2, totalCols);
+    const dateCell = ws.getCell(2, 1);
+    dateCell.value = `Date: ${upload.parsed.date || ""}`;
+    dateCell.font = { bold: true };
+    dateCell.alignment = { horizontal: "left", vertical: "middle" };
+
+    const headerLabels = [...leadCols.map((c) => c.label), dtTemplate.timeLabel, dtTemplate.stateLabel];
+    headerLabels.forEach((label, i) => {
+      const cell = ws.getCell(3, i + 1);
+      cell.value = label;
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: accentARGB } };
+      cell.alignment = { vertical: "middle", horizontal: "left" };
+      cell.border = borderAll;
+    });
+
+    const bandARGB = "FF" + dtTemplate.bandingColor.replace("#", "").toUpperCase();
+    let groupToggle = false;
+    let lastGroupKey = null;
+    rows.forEach((row, idx) => {
+      const rowNum = idx + 4;
+      if (row.groupKey !== lastGroupKey) { groupToggle = !groupToggle; lastGroupKey = row.groupKey; }
+      const banded = dtTemplate.bandingEnabled && groupToggle;
+      const values = [...leadCols.map((c) => dtCellValue(c.field, row)), row.time, row.state];
+      values.forEach((v, i) => {
+        const cell = ws.getCell(rowNum, i + 1);
+        cell.value = v;
+        cell.border = borderAll;
+        cell.alignment = { horizontal: "left", vertical: "middle" };
+        if (banded) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bandARGB } };
+      });
+    });
+
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/octet-stream" });
+    const safeDate = (upload.parsed.date || upload.fileName).replace(/[^a-z0-9]+/gi, "_").slice(0, 40);
+    const fileName = `Transaction_${safeDate}.xlsx`;
+    return saveBlob(blob, fileName, { pickLocation: exportAllMode !== true, dirHandle });
+  }
+
+  function exportDtPdfFor(upload) {
+    if (!upload.parsed) return;
+    const rows = buildDailyTxRows(dtRoster, upload.parsed, dtTemplate.absentPlaceholder);
+    const leadCols = dtTemplate.columns;
+    const win = window.open("", "_blank");
+    const leadHead = leadCols.map((c) => `<th>${escapeAttHtml(c.label)}</th>`).join("");
+    let groupToggle = false;
+    let lastGroupKey = null;
+    const rowsHtml = rows.map((row) => {
+      if (row.groupKey !== lastGroupKey) { groupToggle = !groupToggle; lastGroupKey = row.groupKey; }
+      const banded = dtTemplate.bandingEnabled && groupToggle;
+      const bg = banded ? ` style="background:${dtTemplate.bandingColor}"` : "";
+      const leadCells = leadCols.map((c) => `<td>${escapeAttHtml(dtCellValue(c.field, row))}</td>`).join("");
+      return `<tr${bg}>${leadCells}<td>${escapeAttHtml(row.time)}</td><td>${escapeAttHtml(row.state)}</td></tr>`;
+    }).join("");
+
+    win.document.write(`
+      <html><head><title>${dtTemplate.reportTitle} - ${upload.parsed.date || ""}</title>
+      <style>
+        body{font-family:${T.bodyFont};color:${T.text};padding:28px;}
+        h1{font-family:${T.headFont};text-align:center;color:white;background:${dtTemplate.accent};padding:12px;border-radius:6px;font-size:17px;margin-bottom:6px;}
+        .datebar{font-weight:600;margin-bottom:14px;}
+        table{width:100%;border-collapse:collapse;font-size:12px;}
+        th{background:${dtTemplate.accent};color:#fff;padding:7px 8px;text-align:left;border:1px solid #ccc;}
+        td{padding:5px 8px;border:1px solid #ddd;}
+        @media print{ body{padding:0;} }
+      </style></head><body>
+      <h1>${dtTemplate.reportTitle}</h1>
+      <div class="datebar">Date: ${upload.parsed.date || ""}</div>
+      <table>
+        <thead><tr>${leadHead}<th>${escapeAttHtml(dtTemplate.timeLabel)}</th><th>${escapeAttHtml(dtTemplate.stateLabel)}</th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+      </body></html>`);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 350);
+  }
+
+  async function exportAllDtExcel() {
+    const exportable = dtUploads.filter((u) => u.parsed);
+    if (exportable.length === 0) return;
+    const dirHandle = exportable.length > 1 ? await pickDirectory() : null;
+    for (const upload of exportable) {
+      await exportDtExcelFor(upload, true, dirHandle);
+    }
+  }
+
+  function exportAllDtPdf() {
+    dtUploads.filter((u) => u.parsed).forEach((u) => exportDtPdfFor(u));
   }
 
   const previewData = report
@@ -1360,6 +2207,11 @@ export default function App() {
 
   const canExport = Boolean(report && report.outlets.length > 0);
   const exportableCount = uploads.filter((u) => u.rows && u.territory && buildReport(u.rows, u.territory, u.routeName, u.strategy).outlets.length > 0).length;
+  const pdfCombosCount = uploads.reduce((sum, u) => {
+    if (!u.rows) return sum;
+    const combos = getTerritoryRouteCombos(u.rows);
+    return sum + combos.filter((c) => buildReport(u.rows, c.territory, c.routeName, u.strategy).outlets.length > 0).length;
+  }, 0);
 
   return (
     <div className="min-h-screen" style={{ background: T.bg, fontFamily: T.bodyFont, color: T.text }}>
@@ -1385,9 +2237,16 @@ export default function App() {
               ATTENDANCE
             </button>
             <button
+              onClick={() => setScreen("dailytx")}
+              className="px-4 py-1.5 rounded-full text-sm font-semibold transition-colors"
+              style={{ fontFamily: T.capsFont, fontSize: 12, letterSpacing: "0.06em", background: screen === "dailytx" ? dtTemplate.accent : "transparent", color: screen === "dailytx" ? "#fff" : T.textMuted }}
+            >
+              DAILY TRANSACTION
+            </button>
+            <button
               onClick={() => setScreen("template")}
               className="px-4 py-1.5 rounded-full text-sm font-semibold transition-colors"
-              style={{ fontFamily: T.capsFont, fontSize: 12, letterSpacing: "0.06em", background: screen === "template" ? (templateMode === "attendance" ? attTemplate.accent : template.accent) : "transparent", color: screen === "template" ? "#fff" : T.textMuted }}
+              style={{ fontFamily: T.capsFont, fontSize: 12, letterSpacing: "0.06em", background: screen === "template" ? (templateMode === "attendance" ? attTemplate.accent : templateMode === "dailytx" ? dtTemplate.accent : template.accent) : "transparent", color: screen === "template" ? "#fff" : T.textMuted }}
             >
               TEMPLATE EDITOR
             </button>
@@ -1402,6 +2261,15 @@ export default function App() {
                   <Icon name="picture_as_pdf" />
                 </button>
               </>
+            ) : screen === "dailytx" ? (
+              <>
+                <button onClick={() => activeDtUpload && exportDtExcelFor(activeDtUpload)} disabled={!activeDtUpload || !activeDtUpload.parsed} title="Download today's Excel" style={{ color: dtTemplate.accent, opacity: activeDtUpload && activeDtUpload.parsed ? 1 : 0.35, cursor: activeDtUpload && activeDtUpload.parsed ? "pointer" : "default" }}>
+                  <Icon name="download" />
+                </button>
+                <button onClick={() => activeDtUpload && exportDtPdfFor(activeDtUpload)} disabled={!activeDtUpload || !activeDtUpload.parsed} title="Download today's PDF" style={{ color: dtTemplate.accent, opacity: activeDtUpload && activeDtUpload.parsed ? 1 : 0.35, cursor: activeDtUpload && activeDtUpload.parsed ? "pointer" : "default" }}>
+                  <Icon name="picture_as_pdf" />
+                </button>
+              </>
             ) : (
               <>
                 <button onClick={exportExcel} disabled={!canExport} title="Download Excel" style={{ color: template.accent, opacity: canExport ? 1 : 0.35, cursor: canExport ? "pointer" : "default" }}>
@@ -1412,7 +2280,7 @@ export default function App() {
                 </button>
               </>
             )}
-            <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ background: screen === "attendance" ? attTemplate.accent : template.accent, border: `1px solid ${T.border}` }}>RT</div>
+            <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ background: screen === "attendance" ? attTemplate.accent : screen === "dailytx" ? dtTemplate.accent : template.accent, border: `1px solid ${T.border}` }}>RT</div>
           </div>
         </div>
       </header>
@@ -1427,6 +2295,9 @@ export default function App() {
             attTemplate={attTemplate}
             setAttTemplate={setAttTemplate}
             onResetAtt={() => setAttTemplate(ATTENDANCE_DEFAULT_TEMPLATE)}
+            dtTemplate={dtTemplate}
+            setDtTemplate={setDtTemplate}
+            onResetDt={() => setDtTemplate(DAILY_TX_DEFAULT_TEMPLATE)}
             templateMode={templateMode}
             setTemplateMode={setTemplateMode}
           />
@@ -1448,6 +2319,23 @@ export default function App() {
             exportAttendancePdfFor={exportAttendancePdfFor}
             exportAllAttendanceWeeksExcel={exportAllAttendanceWeeksExcel}
             exportAllAttendanceWeeksPdf={exportAllAttendanceWeeksPdf}
+          />
+        ) : screen === "dailytx" ? (
+          <DailyTransactionScreen
+            dtTemplate={dtTemplate}
+            dtUploads={dtUploads}
+            dtActiveId={dtActiveId}
+            setDtActiveId={setDtActiveId}
+            activeDtUpload={activeDtUpload}
+            activeDtRows={activeDtRows}
+            dtRoster={dtRoster}
+            dtFileInputRef={dtFileInputRef}
+            handleDtFiles={handleDtFiles}
+            removeDtUpload={removeDtUpload}
+            exportDtExcelFor={exportDtExcelFor}
+            exportDtPdfFor={exportDtPdfFor}
+            exportAllDtExcel={exportAllDtExcel}
+            exportAllDtPdf={exportAllDtPdf}
           />
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
@@ -1547,26 +2435,26 @@ export default function App() {
                     <button
                       onClick={exportAllExcel}
                       disabled={exportableCount === 0}
-                      title="You'll be asked where to save each file, one after another"
+                      title="Choose a folder once — all files save there automatically"
                       className="w-full py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-40"
                       style={{ background: template.accent, color: "#fff", fontFamily: T.bodyFont }}
                     >
                       <Icon name="folder_zip" size={16} /> Export All as Excel ({exportableCount})
                     </button>
                   )}
-                  {uploads.length > 1 && (
+                  {pdfCombosCount > 1 && (
                     <button
                       onClick={exportAllPdf}
-                      disabled={exportableCount === 0}
-                      title="Opens a print tab for each file, one after another"
+                      disabled={pdfCombosCount === 0}
+                      title="Opens a clean, line-free print tab for each territory/route found in your uploaded file(s)"
                       className="w-full py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-40"
                       style={{ background: T.surface, color: template.accent, border: `1.5px solid ${template.accent}`, fontFamily: T.bodyFont }}
                     >
-                      <Icon name="picture_as_pdf" size={16} /> Export All as PDF ({exportableCount})
+                      <Icon name="picture_as_pdf" size={16} /> Export All as PDF ({pdfCombosCount})
                     </button>
                   )}
-                  {uploads.length > 1 && exportableCount > 0 && (
-                    <p className="text-xs text-center -mt-2" style={{ color: T.textMuted }}>Excel: you'll be prompted to choose a save location for each file. PDF: a print tab opens for each file at once — allow pop-ups for this site if your browser blocks them.</p>
+                  {pdfCombosCount > 1 && (
+                    <p className="text-xs text-center -mt-2" style={{ color: T.textMuted }}>Excel: pick a destination folder once — every file saves there automatically. PDF: a clean, line-free print tab opens for each territory/route — allow pop-ups for this site if your browser blocks them.</p>
                   )}
                 </div>
               )}
@@ -1621,10 +2509,15 @@ export default function App() {
                       <table className="w-full text-sm">
                         <thead style={{ background: T.surfaceContainer, borderTop: `2px solid ${template.accent}` }}>
                           <tr>
-                            <th className="text-left px-5 py-2.5 w-12" style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{template.colNo}</th>
-                            <th className="text-left px-3 py-2.5" style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{template.colOutlet}</th>
-                            <th className="text-left px-3 py-2.5" style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{template.colProduct}</th>
-                            <th className="text-right px-5 py-2.5" style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{template.colQty}</th>
+                            {template.columns.map((col, ci) => (
+                              <th
+                                key={col.id}
+                                className={`px-3 py-2.5 ${ci === 0 ? "pl-5 w-12" : ""} ${col.field === "qty" ? "text-right pr-5" : "text-left"}`}
+                                style={{ fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}
+                              >
+                                {col.label}
+                              </th>
+                            ))}
                           </tr>
                         </thead>
                         <tbody>
@@ -1633,10 +2526,19 @@ export default function App() {
                             const banded = template.bandingEnabled && absoluteIdx % 2 === 1;
                             return outlet.items.map((item, i) => (
                               <tr key={`${idx}-${i}`} style={{ borderBottom: `1px solid ${T.border}`, background: banded ? template.bandingColor : "transparent" }}>
-                                <td className="px-5 py-2 align-top" style={{ color: T.textMuted }}>{i === 0 ? String(absoluteIdx + 1).padStart(2, "0") : ""}</td>
-                                <td className="px-3 py-2 align-top font-semibold">{i === 0 ? outlet.name : ""}</td>
-                                <td className="px-3 py-2">{item.product}</td>
-                                <td className="px-5 py-2 text-right tabular-nums">{item.qty}</td>
+                                {template.columns.map((col, ci) => {
+                                  const isMerge = SALES_MERGE_FIELDS.has(col.field);
+                                  const value = salesCellValue(col.field, { outletIdx: absoluteIdx, item, isFirst: i === 0, outlet });
+                                  return (
+                                    <td
+                                      key={col.id}
+                                      className={`px-3 py-2 ${ci === 0 ? "pl-5" : ""} ${col.field === "qty" ? "text-right pr-5 tabular-nums" : ""} ${isMerge ? "align-top" : ""} ${col.field === "outlet" ? "font-semibold" : ""}`}
+                                      style={col.field === "no" ? { color: T.textMuted } : undefined}
+                                    >
+                                      {value}
+                                    </td>
+                                  );
+                                })}
                               </tr>
                             ));
                           })}
