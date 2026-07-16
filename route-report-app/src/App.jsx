@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from "react";
 import * as XLSX from "xlsx";
 import ExcelJS from "exceljs";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 
 const SALES_DEFAULT_COLUMNS = [
   { id: "c1", label: "NO", field: "no" },
@@ -112,6 +114,14 @@ const DAILY_TX_FIELD_OPTIONS = [
   { value: "dept", label: "Department (from data)" },
   { value: "", label: "Custom / blank column" },
 ];
+
+function hexToRgb(hex) {
+  const clean = String(hex || "#7A2E33").replace("#", "");
+  const r = parseInt(clean.substring(0, 2), 16);
+  const g = parseInt(clean.substring(2, 4), 16);
+  const b = parseInt(clean.substring(4, 6), 16);
+  return [r, g, b];
+}
 
 function makeColumnId() {
   return `col-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -1214,11 +1224,11 @@ function AttendanceScreen({
                   onClick={() => exportAllAttendanceWeeksPdf(activeAttUpload)}
                   className="w-full py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
                   style={{ background: T.surface, color: attTemplate.accent, border: `1.5px solid ${attTemplate.accent}`, fontFamily: T.bodyFont }}
-                  title="Opens a print tab for each week, one after another"
+                  title="Choose a folder once — a PDF for each week saves there automatically"
                 >
                   <Icon name="picture_as_pdf" size={16} /> Export All Weeks as PDF ({activeAttUpload.parsed.weeks.length})
                 </button>
-                <p className="text-xs text-center -mt-2" style={{ color: T.textMuted }}>Excel: pick a destination folder once — every week saves there automatically. PDF opens a print tab per week — allow pop-ups if your browser blocks them.</p>
+                <p className="text-xs text-center -mt-2" style={{ color: T.textMuted }}>Excel: pick a destination folder once — every week saves there automatically. PDF: pick a destination folder once — a PDF for each week saves there automatically.</p>
               </>
             )}
           </div>
@@ -1410,11 +1420,11 @@ function DailyTransactionScreen({
                   onClick={exportAllDtPdf}
                   className="w-full py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
                   style={{ background: T.surface, color: dtTemplate.accent, border: `1.5px solid ${dtTemplate.accent}`, fontFamily: T.bodyFont }}
-                  title="Opens a print tab for each day, one after another"
+                  title="Choose a folder once — a PDF for each day saves there automatically"
                 >
                   <Icon name="picture_as_pdf" size={16} /> Export All Days as PDF ({dtUploads.filter((u) => u.parsed).length})
                 </button>
-                <p className="text-xs text-center -mt-2" style={{ color: T.textMuted }}>Excel: pick a destination folder once — every day saves there automatically. PDF opens a print tab per day — allow pop-ups if your browser blocks them.</p>
+                <p className="text-xs text-center -mt-2" style={{ color: T.textMuted }}>Excel: pick a destination folder once — every day saves there automatically. PDF: pick a destination folder once — a PDF for each day saves there automatically.</p>
               </>
             )}
           </div>
@@ -1884,59 +1894,82 @@ export default function App() {
     return saveBlob(blob, fileName, { pickLocation: exportAllMode !== true, dirHandle });
   }
 
-  function exportPdfFor(upload, rep, cleanStyle = false) {
+  function exportPdfFor(upload, rep, exportAllMode = false, dirHandle = null) {
     if (!rep) return;
     const cols = template.columns;
-    const win = window.open("", "_blank");
-    const rowsHtml = rep.outlets.map((outlet, idx) => {
-      const banded = template.bandingEnabled && idx % 2 === 1;
-      const groupClass = cleanStyle && idx > 0 ? " outlet-start" : "";
-      const bg = banded ? `background:${template.bandingColor};` : "";
-      return outlet.items.map((item, i) => {
-        const cells = cols.map((col) => {
+    const [ar, ag, ab] = hexToRgb(template.accent);
+    const doc = new jsPDF({ unit: "pt", format: "a4" });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 40;
+
+    doc.setFillColor(ar, ag, ab);
+    doc.rect(0, 0, pageWidth, 56, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(15);
+    doc.text(template.reportTitle, pageWidth / 2, 34, { align: "center" });
+
+    doc.setTextColor(30, 28, 25);
+    doc.setFontSize(10);
+    let y = 78;
+    const metaRows = [
+      [template.territoryLabel, upload.territory],
+      [template.routeLabel, upload.routeName],
+      [template.totalLabel, rep.totalSale.toLocaleString(undefined, { minimumFractionDigits: 2 })],
+      [template.dateLabel, upload.lastVisitDate || "—"],
+    ];
+    metaRows.forEach(([label, value]) => {
+      doc.setFont("helvetica", "bold");
+      doc.text(String(label), margin, y);
+      doc.setFont("helvetica", "normal");
+      doc.text(String(value), margin + 130, y);
+      y += 16;
+    });
+
+    const head = [cols.map((c) => c.label)];
+    const body = [];
+    const groupStartRows = [];
+    rep.outlets.forEach((outlet, idx) => {
+      groupStartRows.push(body.length);
+      outlet.items.forEach((item, i) => {
+        const row = cols.map((col) => {
           const isMerge = SALES_MERGE_FIELDS.has(col.field);
-          const val = (!isMerge || i === 0) ? salesCellValue(col.field, { outletIdx: idx, item, isFirst: true, outlet }) : "";
-          const align = col.field === "qty" ? ' style="text-align:right"' : "";
-          return `<td${align}>${escapeAttHtml(val)}</td>`;
-        }).join("");
-        const rowClass = i === 0 ? groupClass.trim() : "";
-        const classAttr = rowClass ? ` class="${rowClass}"` : "";
-        const styleAttr = bg ? ` style="${bg}"` : "";
-        return `<tr${classAttr}${styleAttr}>${cells}</tr>`;
-      }).join("");
-    }).join("");
+          return (!isMerge || i === 0) ? String(salesCellValue(col.field, { outletIdx: idx, item, isFirst: true, outlet })) : "";
+        });
+        body.push(row);
+      });
+    });
 
-    const headHtml = cols.map((col) => `<th${col.field === "qty" ? ' style="text-align:right"' : ""}>${escapeAttHtml(col.label)}</th>`).join("");
+    const bandRgb = template.bandingEnabled ? hexToRgb(template.bandingColor) : null;
+    const qtyColIdx = cols.findIndex((c) => c.field === "qty");
 
-    const rowCss = cleanStyle
-      ? `td{padding:9px 10px;border-bottom:none;} tr.outlet-start td{border-top:1px solid #e2d9d3;} table{border:1px solid #e2d9d3;}`
-      : `td{padding:5px 8px;border-bottom:1px solid #eee;}`;
+    autoTable(doc, {
+      startY: y + 8,
+      head,
+      body,
+      margin: { left: margin, right: margin },
+      styles: { font: "helvetica", fontSize: 9, cellPadding: 6, lineColor: [226, 217, 211], lineWidth: exportAllMode ? 0 : 0.5 },
+      headStyles: { fillColor: [ar, ag, ab], textColor: [255, 255, 255], fontStyle: "bold" },
+      columnStyles: qtyColIdx >= 0 ? { [qtyColIdx]: { halign: "right" } } : {},
+      didParseCell: (data) => {
+        if (data.section !== "body") return;
+        const outletIdx = rep.outlets.findIndex((o, oi) => {
+          const start = groupStartRows[oi];
+          const end = start + o.items.length;
+          return data.row.index >= start && data.row.index < end;
+        });
+        if (bandRgb && outletIdx % 2 === 1) data.cell.styles.fillColor = bandRgb;
+        if (exportAllMode && groupStartRows.includes(data.row.index) && data.row.index > 0) {
+          data.cell.styles.lineWidth = { top: 0.75, right: 0, bottom: 0, left: 0 };
+          data.cell.styles.lineColor = [226, 217, 211];
+        }
+      },
+    });
 
-    win.document.write(`
-      <html><head><title>${upload.territory} - ${upload.routeName}</title>
-      <style>
-        body{font-family:${T.bodyFont};color:${T.text};padding:32px;}
-        h1{font-family:${T.headFont};text-align:center;color:white;background:${template.accent};padding:14px;border-radius:6px;font-size:18px;margin-bottom:20px;}
-        table{width:100%;border-collapse:collapse;margin-top:16px;font-size:12px;}
-        th{text-align:left;border-bottom:2px solid ${template.accent};color:${template.accent};padding:8px 10px;}
-        ${rowCss}
-        .meta{display:grid;grid-template-columns:160px 1fr;row-gap:6px;font-size:13px;}
-        .meta b{color:${T.textMuted};}
-        @media print{ body{padding:0;} }
-      </style></head><body>
-      <h1>${template.reportTitle}</h1>
-      <div class="meta">
-        <b>${template.territoryLabel}</b><span>${upload.territory}</span>
-        <b>${template.routeLabel}</b><span>${upload.routeName}</span>
-        <b>${template.totalLabel}</b><span>${rep.totalSale.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-        <b>${template.dateLabel}</b><span>${upload.lastVisitDate || "________________"}</span>
-      </div>
-      <table><thead><tr>${headHtml}</tr></thead>
-      <tbody>${rowsHtml}</tbody></table>
-      </body></html>`);
-    win.document.close();
-    win.focus();
-    setTimeout(() => win.print(), 350);
+    const blob = doc.output("blob");
+    const safeRoute = (upload.routeName || upload.territory).replace(/[^a-z0-9]+/gi, "_").slice(0, 40);
+    const fileName = `${upload.territory}_${safeRoute}_LastVisit.pdf`;
+    return saveBlob(blob, fileName, { pickLocation: exportAllMode !== true, dirHandle });
   }
 
   function exportExcel() { if (activeUpload && report) exportExcelFor(activeUpload, report); }
@@ -1954,16 +1987,23 @@ export default function App() {
     }
   }
 
-  function exportAllPdf() {
+  async function exportAllPdf() {
+    const jobs = [];
     uploads.forEach((upload) => {
       if (!upload.rows) return;
       const combos = getTerritoryRouteCombos(upload.rows);
       combos.forEach((combo) => {
         const rep = buildReport(upload.rows, combo.territory, combo.routeName, upload.strategy);
         if (rep.outlets.length === 0) return;
-        exportPdfFor({ ...upload, territory: combo.territory, routeName: combo.routeName }, rep, true);
+        jobs.push({ upload: { ...upload, territory: combo.territory, routeName: combo.routeName }, rep });
       });
     });
+    if (jobs.length === 0) return;
+
+    const dirHandle = jobs.length > 1 ? await pickDirectory() : null;
+    for (const job of jobs) {
+      await exportPdfFor(job.upload, job.rep, true, dirHandle);
+    }
   }
 
   async function exportAttendanceExcelFor(upload, weekDates, weekIdx, pickLocation = true, dirHandle = null) {
@@ -2027,44 +2067,52 @@ export default function App() {
     return saveBlob(blob, fileName, { pickLocation, dirHandle });
   }
 
-  function exportAttendancePdfFor(upload, weekDates) {
+  function exportAttendancePdfFor(upload, weekDates, exportAllMode = false, dirHandle = null) {
     const rowsData = buildAttendanceRows(upload.parsed, weekDates);
     const leadCols = attTemplate.columns;
-    const win = window.open("", "_blank");
-    const headCells = weekDates.map((d) => `<th colspan="2">${escapeAttHtml(formatAttDate(d))}</th>`).join("");
-    const subCells = weekDates.map(() => `<th>${escapeAttHtml(attTemplate.checkInLabel)}</th><th>${escapeAttHtml(attTemplate.checkOutLabel)}</th>`).join("");
-    const leadHeadHtml = leadCols.map((c) => `<th rowspan="2">${escapeAttHtml(c.label)}</th>`).join("");
-    const rowsHtml = rowsData.map((emp, idx) => {
-      const banded = attTemplate.bandingEnabled && idx % 2 === 1;
-      const bg = banded ? ` style="background:${attTemplate.bandingColor}"` : "";
-      const leadCells = leadCols.map((c) => `<td>${escapeAttHtml(attCellValue(c.field, emp))}</td>`).join("");
-      const cells = emp.cells.map((c) => `<td>${escapeAttHtml(c.checkIn)}</td><td>${escapeAttHtml(c.checkOut)}</td>`).join("");
-      return `<tr${bg}>${leadCells}${cells}</tr>`;
-    }).join("");
+    const [ar, ag, ab] = hexToRgb(attTemplate.accent);
+    const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "landscape" });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 30;
 
-    win.document.write(`
-      <html><head><title>${attTemplate.reportTitle}</title>
-      <style>
-        body{font-family:${T.bodyFont};color:${T.text};padding:24px;}
-        h1{font-family:${T.headFont};text-align:center;color:white;background:${attTemplate.accent};padding:12px;border-radius:6px;font-size:16px;margin-bottom:16px;}
-        table{width:100%;border-collapse:collapse;font-size:11px;}
-        th{background:${attTemplate.accent};color:#fff;padding:6px 4px;border:1px solid #ccc;}
-        td{padding:4px;border:1px solid #ddd;text-align:center;}
-        td:nth-child(2){text-align:left;}
-        @media print{ body{padding:0;} }
-      </style></head><body>
-      <h1>${attTemplate.reportTitle} — ${weekRangeLabel(weekDates)}</h1>
-      <table>
-        <thead>
-          <tr>${leadHeadHtml}${headCells}</tr>
-          <tr>${subCells}</tr>
-        </thead>
-        <tbody>${rowsHtml}</tbody>
-      </table>
-      </body></html>`);
-    win.document.close();
-    win.focus();
-    setTimeout(() => win.print(), 350);
+    doc.setFillColor(ar, ag, ab);
+    doc.rect(0, 0, pageWidth, 46, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.text(`${attTemplate.reportTitle} — ${weekRangeLabel(weekDates)}`, pageWidth / 2, 29, { align: "center" });
+
+    const head1 = [
+      ...leadCols.map((c) => ({ content: c.label, rowSpan: 2, styles: { valign: "middle" } })),
+      ...weekDates.map((d) => ({ content: formatAttDate(d), colSpan: 2, styles: { halign: "center" } })),
+    ];
+    const head2 = weekDates.flatMap(() => [attTemplate.checkInLabel, attTemplate.checkOutLabel]);
+
+    const bandRgb = attTemplate.bandingEnabled ? hexToRgb(attTemplate.bandingColor) : null;
+    const body = rowsData.map((emp) => [
+      ...leadCols.map((c) => String(attCellValue(c.field, emp))),
+      ...emp.cells.flatMap((c) => [c.checkIn || "—", c.checkOut || "—"]),
+    ]);
+
+    autoTable(doc, {
+      startY: 60,
+      head: [head1, head2],
+      body,
+      margin: { left: margin, right: margin },
+      styles: { font: "helvetica", fontSize: 8, cellPadding: 5, halign: "center", lineColor: [226, 217, 211], lineWidth: 0.5 },
+      headStyles: { fillColor: [ar, ag, ab], textColor: [255, 255, 255], fontStyle: "bold" },
+      columnStyles: leadCols.reduce((acc, _, i) => ({ ...acc, [i]: { halign: "left" } }), {}),
+      didParseCell: (data) => {
+        if (data.section === "body" && bandRgb && data.row.index % 2 === 1) {
+          data.cell.styles.fillColor = bandRgb;
+        }
+      },
+    });
+
+    const blob = doc.output("blob");
+    const label = weekRangeLabel(weekDates).replace(/[^a-z0-9]+/gi, "_");
+    const fileName = `Attendance_Week_${label}.pdf`;
+    return saveBlob(blob, fileName, { pickLocation: exportAllMode !== true, dirHandle });
   }
 
   async function exportAllAttendanceWeeksExcel(upload) {
@@ -2075,8 +2123,12 @@ export default function App() {
     }
   }
 
-  function exportAllAttendanceWeeksPdf(upload) {
-    upload.parsed.weeks.forEach((weekDates) => exportAttendancePdfFor(upload, weekDates));
+  async function exportAllAttendanceWeeksPdf(upload) {
+    if (!upload.parsed || upload.parsed.weeks.length === 0) return;
+    const dirHandle = upload.parsed.weeks.length > 1 ? await pickDirectory() : null;
+    for (const weekDates of upload.parsed.weeks) {
+      await exportAttendancePdfFor(upload, weekDates, true, dirHandle);
+    }
   }
 
   async function exportDtExcelFor(upload, exportAllMode = false, dirHandle = null) {
@@ -2141,43 +2193,54 @@ export default function App() {
     return saveBlob(blob, fileName, { pickLocation: exportAllMode !== true, dirHandle });
   }
 
-  function exportDtPdfFor(upload) {
+  function exportDtPdfFor(upload, exportAllMode = false, dirHandle = null) {
     if (!upload.parsed) return;
     const rows = buildDailyTxRows(dtRoster, upload.parsed, dtTemplate.absentPlaceholder);
     const leadCols = dtTemplate.columns;
-    const win = window.open("", "_blank");
-    const leadHead = leadCols.map((c) => `<th>${escapeAttHtml(c.label)}</th>`).join("");
-    let groupToggle = false;
-    let lastGroupKey = null;
-    const rowsHtml = rows.map((row) => {
-      if (row.groupKey !== lastGroupKey) { groupToggle = !groupToggle; lastGroupKey = row.groupKey; }
-      const banded = dtTemplate.bandingEnabled && groupToggle;
-      const bg = banded ? ` style="background:${dtTemplate.bandingColor}"` : "";
-      const leadCells = leadCols.map((c) => `<td>${escapeAttHtml(dtCellValue(c.field, row))}</td>`).join("");
-      return `<tr${bg}>${leadCells}<td>${escapeAttHtml(row.time)}</td><td>${escapeAttHtml(row.state)}</td></tr>`;
-    }).join("");
+    const [ar, ag, ab] = hexToRgb(dtTemplate.accent);
+    const doc = new jsPDF({ unit: "pt", format: "a4" });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 40;
 
-    win.document.write(`
-      <html><head><title>${dtTemplate.reportTitle} - ${upload.parsed.date || ""}</title>
-      <style>
-        body{font-family:${T.bodyFont};color:${T.text};padding:28px;}
-        h1{font-family:${T.headFont};text-align:center;color:white;background:${dtTemplate.accent};padding:12px;border-radius:6px;font-size:17px;margin-bottom:6px;}
-        .datebar{font-weight:600;margin-bottom:14px;}
-        table{width:100%;border-collapse:collapse;font-size:12px;}
-        th{background:${dtTemplate.accent};color:#fff;padding:7px 8px;text-align:left;border:1px solid #ccc;}
-        td{padding:5px 8px;border:1px solid #ddd;}
-        @media print{ body{padding:0;} }
-      </style></head><body>
-      <h1>${dtTemplate.reportTitle}</h1>
-      <div class="datebar">Date: ${upload.parsed.date || ""}</div>
-      <table>
-        <thead><tr>${leadHead}<th>${escapeAttHtml(dtTemplate.timeLabel)}</th><th>${escapeAttHtml(dtTemplate.stateLabel)}</th></tr></thead>
-        <tbody>${rowsHtml}</tbody>
-      </table>
-      </body></html>`);
-    win.document.close();
-    win.focus();
-    setTimeout(() => win.print(), 350);
+    doc.setFillColor(ar, ag, ab);
+    doc.rect(0, 0, pageWidth, 50, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.text(dtTemplate.reportTitle, pageWidth / 2, 32, { align: "center" });
+
+    doc.setTextColor(30, 28, 25);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text(`Date: ${upload.parsed.date || ""}`, margin, 68);
+
+    const head = [[...leadCols.map((c) => c.label), dtTemplate.timeLabel, dtTemplate.stateLabel]];
+    const bandRgb = dtTemplate.bandingEnabled ? hexToRgb(dtTemplate.bandingColor) : null;
+    const groupKeys = rows.map((r) => r.groupKey);
+    const body = rows.map((row) => [...leadCols.map((c) => String(dtCellValue(c.field, row))), row.time, row.state]);
+
+    autoTable(doc, {
+      startY: 82,
+      head,
+      body,
+      margin: { left: margin, right: margin },
+      styles: { font: "helvetica", fontSize: 9, cellPadding: 6, lineColor: [204, 204, 204], lineWidth: 0.5 },
+      headStyles: { fillColor: [ar, ag, ab], textColor: [255, 255, 255], fontStyle: "bold" },
+      didParseCell: (data) => {
+        if (data.section !== "body" || !bandRgb) return;
+        let groupToggle = false;
+        let lastKey = null;
+        for (let i = 0; i <= data.row.index; i++) {
+          if (groupKeys[i] !== lastKey) { groupToggle = !groupToggle; lastKey = groupKeys[i]; }
+        }
+        if (groupToggle) data.cell.styles.fillColor = bandRgb;
+      },
+    });
+
+    const blob = doc.output("blob");
+    const safeDate = (upload.parsed.date || upload.fileName).replace(/[^a-z0-9]+/gi, "_").slice(0, 40);
+    const fileName = `Transaction_${safeDate}.pdf`;
+    return saveBlob(blob, fileName, { pickLocation: exportAllMode !== true, dirHandle });
   }
 
   async function exportAllDtExcel() {
@@ -2189,8 +2252,13 @@ export default function App() {
     }
   }
 
-  function exportAllDtPdf() {
-    dtUploads.filter((u) => u.parsed).forEach((u) => exportDtPdfFor(u));
+  async function exportAllDtPdf() {
+    const exportable = dtUploads.filter((u) => u.parsed);
+    if (exportable.length === 0) return;
+    const dirHandle = exportable.length > 1 ? await pickDirectory() : null;
+    for (const upload of exportable) {
+      await exportDtPdfFor(upload, true, dirHandle);
+    }
   }
 
   const previewData = report
@@ -2446,7 +2514,7 @@ export default function App() {
                     <button
                       onClick={exportAllPdf}
                       disabled={pdfCombosCount === 0}
-                      title="Opens a clean, line-free print tab for each territory/route found in your uploaded file(s)"
+                      title="Choose a folder once — a PDF for each territory/route saves there automatically"
                       className="w-full py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-40"
                       style={{ background: T.surface, color: template.accent, border: `1.5px solid ${template.accent}`, fontFamily: T.bodyFont }}
                     >
@@ -2454,7 +2522,7 @@ export default function App() {
                     </button>
                   )}
                   {pdfCombosCount > 1 && (
-                    <p className="text-xs text-center -mt-2" style={{ color: T.textMuted }}>Excel: pick a destination folder once — every file saves there automatically. PDF: a clean, line-free print tab opens for each territory/route — allow pop-ups for this site if your browser blocks them.</p>
+                    <p className="text-xs text-center -mt-2" style={{ color: T.textMuted }}>Excel: pick a destination folder once — every file saves there automatically. PDF: pick a destination folder once — a clean PDF for each territory/route saves there automatically.</p>
                   )}
                 </div>
               )}
