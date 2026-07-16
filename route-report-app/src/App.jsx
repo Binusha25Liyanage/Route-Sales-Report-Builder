@@ -3,6 +3,7 @@ import * as XLSX from "xlsx";
 import ExcelJS from "exceljs";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import { NOTO_SANS_SINHALA_BASE64 } from "./notoSansSinhalaFont.js";
 
 const SALES_DEFAULT_COLUMNS = [
   { id: "c1", label: "NO", field: "no" },
@@ -121,6 +122,15 @@ function hexToRgb(hex) {
   const g = parseInt(clean.substring(2, 4), 16);
   const b = parseInt(clean.substring(4, 6), 16);
   return [r, g, b];
+}
+
+function createUnicodePdf(options) {
+  const doc = new jsPDF(options);
+  doc.addFileToVFS("NotoSansSinhala.ttf", NOTO_SANS_SINHALA_BASE64);
+  doc.addFont("NotoSansSinhala.ttf", "NotoSansSinhala", "normal");
+  doc.addFont("NotoSansSinhala.ttf", "NotoSansSinhala", "bold");
+  doc.setFont("NotoSansSinhala", "normal");
+  return doc;
 }
 
 function makeColumnId() {
@@ -1898,14 +1908,14 @@ export default function App() {
     if (!rep) return;
     const cols = template.columns;
     const [ar, ag, ab] = hexToRgb(template.accent);
-    const doc = new jsPDF({ unit: "pt", format: "a4" });
+    const doc = createUnicodePdf({ unit: "pt", format: "a4" });
     const pageWidth = doc.internal.pageSize.getWidth();
     const margin = 40;
 
     doc.setFillColor(ar, ag, ab);
     doc.rect(0, 0, pageWidth, 56, "F");
     doc.setTextColor(255, 255, 255);
-    doc.setFont("helvetica", "bold");
+    doc.setFont("NotoSansSinhala", "bold");
     doc.setFontSize(15);
     doc.text(template.reportTitle, pageWidth / 2, 34, { align: "center" });
 
@@ -1919,9 +1929,9 @@ export default function App() {
       [template.dateLabel, upload.lastVisitDate || "—"],
     ];
     metaRows.forEach(([label, value]) => {
-      doc.setFont("helvetica", "bold");
+      doc.setFont("NotoSansSinhala", "bold");
       doc.text(String(label), margin, y);
-      doc.setFont("helvetica", "normal");
+      doc.setFont("NotoSansSinhala", "normal");
       doc.text(String(value), margin + 130, y);
       y += 16;
     });
@@ -1948,7 +1958,7 @@ export default function App() {
       head,
       body,
       margin: { left: margin, right: margin },
-      styles: { font: "helvetica", fontSize: 9, cellPadding: 6, lineColor: [226, 217, 211], lineWidth: exportAllMode ? 0 : 0.5 },
+      styles: { font: "NotoSansSinhala", fontSize: 9, cellPadding: 6, lineColor: [226, 217, 211], lineWidth: exportAllMode ? 0 : 0.5 },
       headStyles: { fillColor: [ar, ag, ab], textColor: [255, 255, 255], fontStyle: "bold" },
       columnStyles: qtyColIdx >= 0 ? { [qtyColIdx]: { halign: "right" } } : {},
       didParseCell: (data) => {
@@ -2071,14 +2081,14 @@ export default function App() {
     const rowsData = buildAttendanceRows(upload.parsed, weekDates);
     const leadCols = attTemplate.columns;
     const [ar, ag, ab] = hexToRgb(attTemplate.accent);
-    const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "landscape" });
+    const doc = createUnicodePdf({ unit: "pt", format: "a4", orientation: "landscape" });
     const pageWidth = doc.internal.pageSize.getWidth();
     const margin = 30;
 
     doc.setFillColor(ar, ag, ab);
     doc.rect(0, 0, pageWidth, 46, "F");
     doc.setTextColor(255, 255, 255);
-    doc.setFont("helvetica", "bold");
+    doc.setFont("NotoSansSinhala", "bold");
     doc.setFontSize(13);
     doc.text(`${attTemplate.reportTitle} — ${weekRangeLabel(weekDates)}`, pageWidth / 2, 29, { align: "center" });
 
@@ -2099,7 +2109,7 @@ export default function App() {
       head: [head1, head2],
       body,
       margin: { left: margin, right: margin },
-      styles: { font: "helvetica", fontSize: 8, cellPadding: 5, halign: "center", lineColor: [226, 217, 211], lineWidth: 0.5 },
+      styles: { font: "NotoSansSinhala", fontSize: 8, cellPadding: 5, halign: "center", lineColor: [226, 217, 211], lineWidth: 0.5 },
       headStyles: { fillColor: [ar, ag, ab], textColor: [255, 255, 255], fontStyle: "bold" },
       columnStyles: leadCols.reduce((acc, _, i) => ({ ...acc, [i]: { halign: "left" } }), {}),
       didParseCell: (data) => {
@@ -2198,19 +2208,19 @@ export default function App() {
     const rows = buildDailyTxRows(dtRoster, upload.parsed, dtTemplate.absentPlaceholder);
     const leadCols = dtTemplate.columns;
     const [ar, ag, ab] = hexToRgb(dtTemplate.accent);
-    const doc = new jsPDF({ unit: "pt", format: "a4" });
+    const doc = createUnicodePdf({ unit: "pt", format: "a4" });
     const pageWidth = doc.internal.pageSize.getWidth();
     const margin = 40;
 
     doc.setFillColor(ar, ag, ab);
     doc.rect(0, 0, pageWidth, 50, "F");
     doc.setTextColor(255, 255, 255);
-    doc.setFont("helvetica", "bold");
+    doc.setFont("NotoSansSinhala", "bold");
     doc.setFontSize(14);
     doc.text(dtTemplate.reportTitle, pageWidth / 2, 32, { align: "center" });
 
     doc.setTextColor(30, 28, 25);
-    doc.setFont("helvetica", "bold");
+    doc.setFont("NotoSansSinhala", "bold");
     doc.setFontSize(10);
     doc.text(`Date: ${upload.parsed.date || ""}`, margin, 68);
 
@@ -2224,7 +2234,7 @@ export default function App() {
       head,
       body,
       margin: { left: margin, right: margin },
-      styles: { font: "helvetica", fontSize: 9, cellPadding: 6, lineColor: [204, 204, 204], lineWidth: 0.5 },
+      styles: { font: "NotoSansSinhala", fontSize: 9, cellPadding: 6, lineColor: [204, 204, 204], lineWidth: 0.5 },
       headStyles: { fillColor: [ar, ag, ab], textColor: [255, 255, 255], fontStyle: "bold" },
       didParseCell: (data) => {
         if (data.section !== "body" || !bandRgb) return;
@@ -2510,7 +2520,7 @@ export default function App() {
                       <Icon name="folder_zip" size={16} /> Export All as Excel ({exportableCount})
                     </button>
                   )}
-                  {pdfCombosCount > 1 && (
+                  {uploads.length > 1 && (
                     <button
                       onClick={exportAllPdf}
                       disabled={pdfCombosCount === 0}
@@ -2521,7 +2531,7 @@ export default function App() {
                       <Icon name="picture_as_pdf" size={16} /> Export All as PDF ({pdfCombosCount})
                     </button>
                   )}
-                  {pdfCombosCount > 1 && (
+                  {uploads.length > 1 && (
                     <p className="text-xs text-center -mt-2" style={{ color: T.textMuted }}>Excel: pick a destination folder once — every file saves there automatically. PDF: pick a destination folder once — a clean PDF for each territory/route saves there automatically.</p>
                   )}
                 </div>
