@@ -70,6 +70,7 @@ const ATTENDANCE_DEFAULT_TEMPLATE = {
   columns: ATTENDANCE_DEFAULT_COLUMNS,
   checkInLabel: "Check in",
   checkOutLabel: "Check out",
+  showWeekdayNames: false,
   accent: "#7A2E33",
   bandingEnabled: true,
   bandingColor: "#F3E3E1",
@@ -159,8 +160,11 @@ function autoMapField(label, kind) {
   return "";
 }
 
+const WEEKDAY_NAMES_LOWER = new Set(["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]);
+
 function parseImportedColumns(workbook, kind) {
-  for (const sheetName of workbook.SheetNames) {
+  const sheetNames = [...workbook.SheetNames].reverse();
+  for (const sheetName of sheetNames) {
     const sheet = workbook.Sheets[sheetName];
     const arr = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true });
 
@@ -172,19 +176,32 @@ function parseImportedColumns(workbook, kind) {
         if (hasQty && hasOutletOrProduct) {
           const detected = (row || []).filter((c) => c !== null && c !== undefined && String(c).trim() !== "");
           if (detected.length >= 2) {
-            return detected.map((label) => ({ id: makeColumnId(), label: String(label).trim(), field: autoMapField(label, "sales") }));
+            return { columns: detected.map((label) => ({ id: makeColumnId(), label: String(label).trim(), field: autoMapField(label, "sales") })), meta: {} };
           }
         }
       }
     } else if (kind === "attendance") {
-      for (const row of arr) {
+      for (let ri = 0; ri < arr.length; ri++) {
+        const row = arr[ri];
         const cells = (row || []).map((c) => normalizeHeaderText(c));
         const checkInIdx = cells.findIndex((c) => c.includes("check in") || c.includes("check-in") || c === "checkin");
         const hasEmployeeHints = cells.some((c) => c.includes("employee") || c.includes("department") || c.includes("first name"));
         if (checkInIdx > 0 && hasEmployeeHints) {
           const leading = (row || []).slice(0, checkInIdx).filter((c) => c !== null && c !== undefined && String(c).trim() !== "");
           if (leading.length >= 1) {
-            return leading.map((label) => ({ id: makeColumnId(), label: String(label).trim(), field: autoMapField(label, "attendance") }));
+            // Look upward through the rows above the header for a row of weekday names
+            // (Monday, Tuesday, ...) — if present, the person wants a weekday-name row
+            // shown above the date row, computed automatically from the real data.
+            let showWeekdayNames = false;
+            for (let above = ri - 1; above >= 0 && above >= ri - 3; above--) {
+              const aboveCells = (arr[above] || []).map((c) => normalizeHeaderText(c));
+              const weekdayHits = aboveCells.filter((c) => WEEKDAY_NAMES_LOWER.has(c)).length;
+              if (weekdayHits >= 2) { showWeekdayNames = true; break; }
+            }
+            return {
+              columns: leading.map((label) => ({ id: makeColumnId(), label: String(label).trim(), field: autoMapField(label, "attendance") })),
+              meta: { showWeekdayNames },
+            };
           }
         }
       }
@@ -196,7 +213,7 @@ function parseImportedColumns(workbook, kind) {
         if (punchIdx > 0 && hasEmployeeHints) {
           const leading = (row || []).slice(0, punchIdx).filter((c) => c !== null && c !== undefined && String(c).trim() !== "");
           if (leading.length >= 1) {
-            return leading.map((label) => ({ id: makeColumnId(), label: String(label).trim(), field: autoMapField(label, "attendance") }));
+            return { columns: leading.map((label) => ({ id: makeColumnId(), label: String(label).trim(), field: autoMapField(label, "attendance") })), meta: {} };
           }
         }
       }
@@ -321,6 +338,11 @@ function parseAttendanceWorkbook(workbook) {
 function formatAttDate(iso) {
   const [y, m, d] = iso.split("-").map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+function formatWeekday(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: "long" });
 }
 
 // ---------- Daily Transaction report ----------
@@ -656,9 +678,10 @@ function Select({ value, onChange, children }) {
   );
 }
 
-function ColumnListEditor({ columns, setColumns, fieldOptions, accent, importKind, importLabel }) {
+function ColumnListEditor({ columns, setColumns, fieldOptions, accent, importKind, importLabel, onImportMeta }) {
   const fileRef = useRef(null);
   const [importError, setImportError] = useState("");
+  const [importSuccess, setImportSuccess] = useState("");
 
   function updateCol(id, patch) {
     setColumns(columns.map((c) => (c.id === id ? { ...c, ...patch } : c)));
@@ -681,12 +704,15 @@ function ColumnListEditor({ columns, setColumns, fieldOptions, accent, importKin
 
   function handleImportFile(file) {
     setImportError("");
+    setImportSuccess("");
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
         const wb = XLSX.read(e.target.result, { type: "array" });
         const detected = parseImportedColumns(wb, importKind);
-        setColumns(detected);
+        setColumns(detected.columns);
+        if (onImportMeta) onImportMeta(detected.meta || {});
+        setImportSuccess(`Imported ${detected.columns.length} column${detected.columns.length === 1 ? "" : "s"}${detected.meta && detected.meta.showWeekdayNames ? " — weekday-name row detected and enabled" : ""}.`);
       } catch (err) {
         setImportError(err.message || "Couldn't read that file's column layout.");
       }
@@ -711,6 +737,9 @@ function ColumnListEditor({ columns, setColumns, fieldOptions, accent, importKin
       </div>
       {importError && (
         <p className="text-xs flex items-start gap-1.5 mb-2" style={{ color: "#ba1a1a" }}><Icon name="error" size={14} />{importError}</p>
+      )}
+      {importSuccess && (
+        <p className="text-xs flex items-start gap-1.5 mb-2" style={{ color: "#2E7A4E" }}><Icon name="check_circle" size={14} />{importSuccess}</p>
       )}
 
       <div className="space-y-2">
@@ -924,7 +953,7 @@ function TemplateEditor({ template, setTemplate, onReset, previewData, attTempla
             <p className="text-sm mt-1" style={{ color: T.textMuted, fontFamily: T.bodyFont }}>Customize your template's layout and metadata labels.</p>
           </div>
 
-          {!isAtt ? (
+          {!isAtt && !isDt ? (
             <>
               <div className="space-y-5">
                 <div>
@@ -944,11 +973,57 @@ function TemplateEditor({ template, setTemplate, onReset, previewData, attTempla
               <div className="pt-5">
                 <ColumnListEditor
                   columns={template.columns}
-                  setColumns={(cols) => setTemplate({ ...template, columns: cols })}
+                  setColumns={(cols) => setTemplate((prev) => ({ ...prev, columns: cols }))}
                   fieldOptions={SALES_FIELD_OPTIONS}
                   accent={template.accent}
                   importKind="sales"
                   importLabel="Table columns"
+                />
+              </div>
+            </>
+          ) : isAtt ? (
+            <>
+              <div className="space-y-5">
+                <div>
+                  <Label>Report title</Label>
+                  <TextField {...field("reportTitle")} />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div><Label>Check-in label</Label><TextField {...field("checkInLabel")} /></div>
+                  <div><Label>Check-out label</Label><TextField {...field("checkOutLabel")} /></div>
+                </div>
+                <div className="flex items-center justify-between rounded-lg px-3 py-2.5" style={{ background: T.surfaceLow, border: `1px solid ${T.border}` }}>
+                  <div>
+                    <span className="text-sm font-medium" style={{ color: T.text, fontFamily: T.bodyFont }}>Show weekday name row</span>
+                    <p className="text-xs mt-0.5" style={{ color: T.textMuted }}>Adds a "Monday, Tuesday, ..." row above each week's dates — computed automatically from the real dates, never hand-typed.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAttTemplate((prev) => ({ ...prev, showWeekdayNames: !prev.showWeekdayNames }))}
+                    className="relative rounded-full transition-colors shrink-0 ml-3"
+                    style={{ background: attTemplate.showWeekdayNames ? attTemplate.accent : T.border, height: 22, width: 40 }}
+                  >
+                    <span
+                      className="absolute top-0.5 rounded-full bg-white transition-transform"
+                      style={{ width: 18, height: 18, left: 2, transform: attTemplate.showWeekdayNames ? "translateX(18px)" : "translateX(0)" }}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-5">
+                <ColumnListEditor
+                  columns={attTemplate.columns}
+                  setColumns={(cols) => setAttTemplate((prev) => ({ ...prev, columns: cols }))}
+                  fieldOptions={ATTENDANCE_FIELD_OPTIONS}
+                  accent={attTemplate.accent}
+                  importKind="attendance"
+                  importLabel="Employee columns (before the daily Check in / Check out)"
+                  onImportMeta={(meta) => {
+                    if (typeof meta.showWeekdayNames === "boolean") {
+                      setAttTemplate((prev) => ({ ...prev, showWeekdayNames: meta.showWeekdayNames }));
+                    }
+                  }}
                 />
               </div>
             </>
@@ -960,19 +1035,19 @@ function TemplateEditor({ template, setTemplate, onReset, previewData, attTempla
                   <TextField {...field("reportTitle")} />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
-                  <div><Label>Check-in label</Label><TextField {...field("checkInLabel")} /></div>
-                  <div><Label>Check-out label</Label><TextField {...field("checkOutLabel")} /></div>
+                  <div><Label>Time label</Label><TextField {...field("timeLabel")} /></div>
+                  <div><Label>Punch state label</Label><TextField {...field("stateLabel")} /></div>
                 </div>
               </div>
 
               <div className="pt-5">
                 <ColumnListEditor
-                  columns={attTemplate.columns}
-                  setColumns={(cols) => setAttTemplate({ ...attTemplate, columns: cols })}
-                  fieldOptions={ATTENDANCE_FIELD_OPTIONS}
-                  accent={attTemplate.accent}
-                  importKind="attendance"
-                  importLabel="Employee columns (before the daily Check in / Check out)"
+                  columns={dtTemplate.columns}
+                  setColumns={(cols) => setDtTemplate((prev) => ({ ...prev, columns: cols }))}
+                  fieldOptions={DAILY_TX_FIELD_OPTIONS}
+                  accent={dtTemplate.accent}
+                  importKind="dailytx"
+                  importLabel="Employee columns (before Time / Punch State)"
                 />
               </div>
             </>
@@ -1329,12 +1404,22 @@ function AttendanceScreen({
             <div className="overflow-x-auto">
               <table className="text-sm" style={{ minWidth: 620 + activeAttWeekDates.length * 160 }}>
                 <thead>
+                  {attTemplate.showWeekdayNames && (
+                    <tr>
+                      {attTemplate.columns.map((col) => (
+                        <th key={col.id} rowSpan={3} className="text-left px-4 py-2.5 align-bottom" style={{ background: T.surfaceContainer, borderTop: `2px solid ${attTemplate.accent}`, fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{col.label}</th>
+                      ))}
+                      {activeAttWeekDates.map((d) => (
+                        <th key={d} colSpan={2} className="text-center px-2 py-1.5" style={{ background: T.surfaceContainer, borderTop: `2px solid ${attTemplate.accent}`, borderLeft: `1px solid ${T.border}`, fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.06em", color: attTemplate.accent, fontWeight: 700 }}>{formatWeekday(d)}</th>
+                      ))}
+                    </tr>
+                  )}
                   <tr>
-                    {attTemplate.columns.map((col) => (
+                    {!attTemplate.showWeekdayNames && attTemplate.columns.map((col) => (
                       <th key={col.id} rowSpan={2} className="text-left px-4 py-2.5 align-bottom" style={{ background: T.surfaceContainer, borderTop: `2px solid ${attTemplate.accent}`, fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.08em", color: T.textMuted }}>{col.label}</th>
                     ))}
                     {activeAttWeekDates.map((d) => (
-                      <th key={d} colSpan={2} className="text-center px-2 py-1.5" style={{ background: T.surfaceContainer, borderTop: `2px solid ${attTemplate.accent}`, borderLeft: `1px solid ${T.border}`, fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.06em", color: T.text }}>{formatAttDate(d)}</th>
+                      <th key={d} colSpan={2} className="text-center px-2 py-1.5" style={{ background: T.surfaceContainer, borderTop: attTemplate.showWeekdayNames ? "none" : `2px solid ${attTemplate.accent}`, borderLeft: `1px solid ${T.border}`, fontFamily: T.capsFont, fontSize: 10, letterSpacing: "0.06em", color: T.text }}>{formatAttDate(d)}</th>
                     ))}
                   </tr>
                   <tr>
@@ -2063,6 +2148,12 @@ export default function App() {
     const rowsData = buildAttendanceRows(upload.parsed, weekDates);
     const leadCols = attTemplate.columns;
     const leadCount = leadCols.length;
+    const showWk = attTemplate.showWeekdayNames;
+    const weekdayRowNum = showWk ? 2 : null;
+    const dateActualRowNum = showWk ? 3 : 2;
+    const headerRowNum = showWk ? 4 : 3;
+    const dataStartRow = headerRowNum + 1;
+
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Attendance");
     ws.columns = [...leadCols.map(() => ({ width: 16 })), ...weekDates.flatMap(() => [{ width: 11 }, { width: 11 }])];
@@ -2079,19 +2170,32 @@ export default function App() {
     titleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: accentARGB } };
     ws.getRow(1).height = 22;
 
+    if (showWk) {
+      ws.mergeCells(weekdayRowNum, 1, dateActualRowNum, leadCount);
+      weekDates.forEach((d, i) => {
+        const startCol = leadCount + 1 + i * 2;
+        ws.mergeCells(weekdayRowNum, startCol, weekdayRowNum, startCol + 1);
+        const cell = ws.getCell(weekdayRowNum, startCol);
+        cell.value = formatWeekday(d);
+        cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: accentARGB } };
+      });
+    }
+
     weekDates.forEach((d, i) => {
       const startCol = leadCount + 1 + i * 2;
-      ws.mergeCells(1, startCol, 1, startCol + 1);
-      const cell = ws.getCell(1, startCol);
+      ws.mergeCells(dateActualRowNum, startCol, dateActualRowNum, startCol + 1);
+      const cell = ws.getCell(dateActualRowNum, startCol);
       cell.value = formatAttDate(d);
-      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.font = { bold: true, color: { argb: showWk ? "FF1C1C19" : "FFFFFFFF" } };
       cell.alignment = { horizontal: "center", vertical: "middle" };
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: accentARGB } };
+      if (!showWk) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: accentARGB } };
     });
 
     const headerLabels = [...leadCols.map((c) => c.label), ...weekDates.flatMap(() => [attTemplate.checkInLabel, attTemplate.checkOutLabel])];
     headerLabels.forEach((label, i) => {
-      const cell = ws.getCell(2, i + 1);
+      const cell = ws.getCell(headerRowNum, i + 1);
       cell.value = label;
       cell.font = { bold: true };
       cell.border = borderAll;
@@ -2101,7 +2205,7 @@ export default function App() {
 
     const bandARGB = "FF" + attTemplate.bandingColor.replace("#", "").toUpperCase();
     rowsData.forEach((emp, idx) => {
-      const rowNum = idx + 3;
+      const rowNum = dataStartRow + idx;
       const banded = attTemplate.bandingEnabled && idx % 2 === 1;
       const values = [...leadCols.map((c) => attCellValue(c.field, emp)), ...emp.cells.flatMap((c) => [c.checkIn, c.checkOut])];
       values.forEach((v, i) => {
@@ -2123,6 +2227,7 @@ export default function App() {
   function exportAttendancePdfFor(upload, weekDates, exportAllMode = false, dirHandle = null) {
     const rowsData = buildAttendanceRows(upload.parsed, weekDates);
     const leadCols = attTemplate.columns;
+    const showWk = attTemplate.showWeekdayNames;
     const [ar, ag, ab] = hexToRgb(attTemplate.accent);
     const doc = createUnicodePdf({ unit: "pt", format: "a4", orientation: "landscape" });
     const pageWidth = doc.internal.pageSize.getWidth();
@@ -2135,11 +2240,20 @@ export default function App() {
     doc.setFontSize(13);
     doc.text(`${attTemplate.reportTitle} — ${weekRangeLabel(weekDates)}`, pageWidth / 2, 29, { align: "center" });
 
-    const head1 = [
-      ...leadCols.map((c) => ({ content: c.label, rowSpan: 2, styles: { valign: "middle" } })),
-      ...weekDates.map((d) => ({ content: formatAttDate(d), colSpan: 2, styles: { halign: "center" } })),
-    ];
-    const head2 = weekDates.flatMap(() => [attTemplate.checkInLabel, attTemplate.checkOutLabel]);
+    const headRows = [];
+    if (showWk) {
+      headRows.push([
+        ...leadCols.map((c) => ({ content: c.label, rowSpan: 3, styles: { valign: "middle" } })),
+        ...weekDates.map((d) => ({ content: formatWeekday(d), colSpan: 2, styles: { halign: "center" } })),
+      ]);
+      headRows.push(weekDates.map((d) => ({ content: formatAttDate(d), colSpan: 2, styles: { halign: "center", fillColor: [255, 255, 255], textColor: [27, 27, 29] } })));
+    } else {
+      headRows.push([
+        ...leadCols.map((c) => ({ content: c.label, rowSpan: 2, styles: { valign: "middle" } })),
+        ...weekDates.map((d) => ({ content: formatAttDate(d), colSpan: 2, styles: { halign: "center" } })),
+      ]);
+    }
+    headRows.push(weekDates.flatMap(() => [attTemplate.checkInLabel, attTemplate.checkOutLabel]));
 
     const bandRgb = attTemplate.bandingEnabled ? hexToRgb(attTemplate.bandingColor) : null;
     const body = rowsData.map((emp) => [
@@ -2149,7 +2263,7 @@ export default function App() {
 
     autoTable(doc, {
       startY: 60,
-      head: [head1, head2],
+      head: headRows,
       body,
       margin: { left: margin, right: margin },
       styles: { font: "NotoSansSinhala", fontSize: 8, cellPadding: 5, halign: "center", lineColor: [226, 217, 211], lineWidth: 0.5 },
