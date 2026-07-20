@@ -219,8 +219,26 @@ function parseAttendanceWorkbook(workbook) {
     for (let i = 0; i < arr.length; i++) {
       const r = arr[i] || [];
       const norm = r.map((c) => String(c || "").trim().toLowerCase());
+
+      // Variant B: "Total Time Card" style — one row per employee per day, with
+      // pre-resolved Clock In / Clock Out columns already computed.
+      const clockInIdx = norm.indexOf("clock in");
+      const clockOutIdx = norm.indexOf("clock out");
+      if (norm.includes("employee id") && norm.includes("date") && clockInIdx !== -1 && clockOutIdx !== -1) {
+        headerInfo = { arr, headerRow: i, mode: "clockPair", cols: {
+          empId: norm.indexOf("employee id"),
+          name: norm.indexOf("first name"),
+          dept: norm.indexOf("department"),
+          date: norm.indexOf("date"),
+          clockIn: clockInIdx,
+          clockOut: clockOutIdx,
+        } };
+        break;
+      }
+
+      // Variant A: raw punch-log / "Transaction" style — one row per punch event.
       if (norm.includes("employee id") && norm.includes("date") && norm.includes("time")) {
-        headerInfo = { arr, headerRow: i, cols: {
+        headerInfo = { arr, headerRow: i, mode: "punches", cols: {
           empId: norm.indexOf("employee id"),
           name: norm.indexOf("first name"),
           dept: norm.indexOf("department"),
@@ -232,37 +250,62 @@ function parseAttendanceWorkbook(workbook) {
     }
     if (headerInfo) break;
   }
-  if (!headerInfo) throw new Error("Couldn't find a sheet with Employee ID / Date / Time columns. Is this an attendance transaction export?");
+  if (!headerInfo) {
+    throw new Error(
+      "Couldn't find a recognizable attendance sheet. Expected either a punch-log export " +
+      "(Employee ID / Date / Time columns) or a Total Time Card export (Employee ID / Date / " +
+      "Clock In / Clock Out columns)."
+    );
+  }
 
-  const { arr, headerRow, cols } = headerInfo;
+  const { arr, headerRow, cols, mode } = headerInfo;
   const employees = new Map();
   const byEmpDate = new Map();
   const dateSet = new Set();
+
+  function normDate(v) {
+    if (v instanceof Date) {
+      const y = v.getFullYear(), m = String(v.getMonth() + 1).padStart(2, "0"), d = String(v.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+    return String(v).trim();
+  }
 
   for (let i = headerRow + 1; i < arr.length; i++) {
     const r = arr[i] || [];
     const empId = r[cols.empId];
     const date = r[cols.date];
-    const time = r[cols.time];
-    if (empId === null || empId === undefined || empId === "" || !date || !time) continue;
+    if (empId === null || empId === undefined || empId === "" || !date) continue;
 
     const empIdStr = String(empId).trim();
-    const dateStr = String(date).trim();
-    const timeStr = String(time).trim();
+    const dateStr = normDate(date);
 
     if (!employees.has(empIdStr)) {
       employees.set(empIdStr, { empId: empIdStr, name: String(r[cols.name] || "").trim(), dept: String(r[cols.dept] || "").trim() });
     }
     dateSet.add(dateStr);
-
     const key = `${empIdStr}|${dateStr}`;
-    if (!byEmpDate.has(key)) byEmpDate.set(key, []);
-    byEmpDate.get(key).push(timeStr);
+
+    if (mode === "clockPair") {
+      const clockIn = r[cols.clockIn];
+      const clockOut = r[cols.clockOut];
+      if (!clockIn && !clockOut) continue; // absent that day — leave no entry so it shows as "-"
+      const times = [];
+      if (clockIn) times.push(String(clockIn).trim());
+      if (clockOut) times.push(String(clockOut).trim());
+      byEmpDate.set(key, times);
+    } else {
+      const time = r[cols.time];
+      if (!time) continue;
+      const timeStr = String(time).trim();
+      if (!byEmpDate.has(key)) byEmpDate.set(key, []);
+      byEmpDate.get(key).push(timeStr);
+    }
   }
 
-  if (employees.size === 0) throw new Error("No attendance transaction rows were found.");
+  if (employees.size === 0) throw new Error("No attendance rows were found in this file.");
 
-  byEmpDate.forEach((times) => times.sort());
+  if (mode === "punches") byEmpDate.forEach((times) => times.sort());
 
   const dates = [...dateSet].sort();
   const employeeList = [...employees.values()].sort((a, b) => Number(a.empId) - Number(b.empId) || a.empId.localeCompare(b.empId));
@@ -1154,7 +1197,7 @@ function AttendanceScreen({
           >
             <Icon name="cloud_upload" size={30} style={{ color: T.textMuted }} />
             <p className="text-sm font-semibold mt-2">Drop files here or click</p>
-            <p className="text-xs mt-1" style={{ color: T.textMuted }}>Employee attendance / punch-log export (.xlsx). Weeks are split automatically from whatever date range the file covers.</p>
+            <p className="text-xs mt-1" style={{ color: T.textMuted }}>Punch-log or Total Time Card export (.xlsx) — both formats supported. Weeks are split automatically from whatever date range the file covers.</p>
             <input ref={attFileInputRef} type="file" accept=".xlsx,.xls" multiple className="hidden" onChange={(e) => { if (e.target.files.length) handleAttFiles(e.target.files); e.target.value = ""; }} />
           </div>
           {attUploads.length > 0 && (
